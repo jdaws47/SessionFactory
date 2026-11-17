@@ -1254,7 +1254,7 @@ function paintScenery(g: CanvasRenderingContext2D): void {
 
 }
 
-/** The warehouse page: its own floor and a big platform for the stacks. */
+/** The warehouse page: ground with rocks and plants, and a walled building with a doorway for the rail. */
 function paintWarehouse(g: CanvasRenderingContext2D): void {
   const floor = g.createLinearGradient(0, 0, 0, H);
   floor.addColorStop(0, C.floorTop);
@@ -1266,8 +1266,61 @@ function paintWarehouse(g: CanvasRenderingContext2D): void {
     g.fillStyle = `rgba(255,240,220,${rnd() * 0.035})`;
     g.fillRect(WAREHOUSE_X + rnd() * W, rnd() * H, 2, 2);
   }
+
   const p = STACKS.platform;
+  const WALL = 14;
+  const outer = { x: p.x - WALL, y: p.y - WALL, w: p.w + WALL * 2, h: p.h + WALL * 2 };
+  // Ground cover outside the building, kept off the rail.
+  const plants: Point[] = [];
+  for (let i = 0; i < 1400; i++) {
+    const q = { x: WAREHOUSE_X + rnd() * W, y: rnd() * H };
+    const isPlant = rnd() < 0.55;
+    const nearBuilding = q.x > outer.x - 12 && q.x < outer.x + outer.w + 12 && q.y > outer.y - 12 && q.y < outer.y + outer.h + 24;
+    const onRail = q.y > TRAIN_Y - 10 && q.y < TRAIN_Y + 54;
+    if (nearBuilding || onRail || q.y < 8) continue;
+    if (isPlant) plants.push(q);
+    else {
+      const w = 5 + rnd() * 9;
+      const h = 4 + rnd() * 5;
+      squirclePath(g, q.x - w / 2, q.y - h / 2, w, h, Math.min(w, h) * 0.3);
+      g.fillStyle = C.rock;
+      g.fill();
+    }
+  }
+
+  // Walls: a thick steel band around the floor, with a lighter cap, pillars, and a doorway for the rail.
+  g.save();
+  g.shadowColor = 'rgba(0,0,0,0.6)';
+  g.shadowBlur = 24;
+  g.shadowOffsetY = 10;
+  fillSquircle(g, outer.x, outer.y, outer.w, outer.h, RADIUS.large + 4, '#33373d');
+  g.restore();
   foundation(g, 'warehouse', { ...p, title: 'WAREHOUSE', subtitle: '' });
+  g.strokeStyle = '#5a606a';
+  g.lineWidth = 2;
+  squirclePath(g, outer.x + 1, outer.y + 1, outer.w - 2, outer.h - 2, RADIUS.large + 3);
+  g.stroke();
+  const door = { y: TRAIN_Y - 6, h: 52 };
+  g.fillStyle = C.floorBottom;
+  g.fillRect(outer.x - 1, door.y, WALL + 3, door.h);
+  fillSquircle(g, outer.x - 4, door.y - 8, WALL + 8, 8, 2, C.orange);
+  fillSquircle(g, outer.x - 4, door.y + door.h, WALL + 8, 8, 2, C.orange);
+  const pillar = (x: number, y: number) => {
+    fillSquircle(g, x - 11, y - 11, 22, 22, 4, '#4a4f57');
+    fillSquircle(g, x - 11, y - 11, 22, 5, 2, C.orange);
+  };
+  const half = WALL / 2;
+  for (let x = outer.x + half; x <= outer.x + outer.w - half + 1; x += (outer.w - WALL) / 6) {
+    pillar(x, outer.y + half);
+    pillar(x, outer.y + outer.h - half);
+  }
+  for (let y = outer.y + half; y <= outer.y + outer.h - half + 1; y += (outer.h - WALL) / 4) {
+    pillar(outer.x + outer.w - half, y);
+    if (y < door.y - 12 || y > door.y + door.h + 12) pillar(outer.x + half, y);
+  }
+
+  const plantRnd = seeded(29);
+  for (const q of plants) plant(g, q.x, q.y, plantRnd);
   paintRail(g);
 }
 
