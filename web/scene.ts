@@ -356,6 +356,32 @@ export class Scene {
   }
 
   /** Sends a sprite to a slot along the belts, after finishing the trip it is already on. */
+  /**
+   * When a crate's remaining route rides the main loop past the turn-off for `to` before leaving the loop, the
+   * route cut short at that turn-off. Undefined when the turn-off isn't ahead on this stretch of loop.
+   */
+  private turnOffAhead(s: Sprite, to: SlotRef): Waypoint[] | undefined {
+    const entry = NET[to.zone].entryLoopS;
+    const ahead = (from: number) => (entry - from + LOOP.total) % LOOP.total;
+    let prev: { i: number; s: number } | undefined;
+    if (s.path[0]?.track === LOOP) prev = { i: -1, s: LOOP.project(s) };
+    for (let i = 0; i < s.path.length; i++) {
+      const w = s.path[i];
+      if (w.track !== LOOP) {
+        if (prev) break; // left the loop: the turn-off wasn't on this stretch
+        continue;
+      }
+      const here = LOOP.project(w);
+      if (prev && ahead(prev.s) > 0 && ahead(prev.s) <= (here - prev.s + LOOP.total) % LOOP.total) {
+        const kept = s.path.slice(0, prev.i + 1);
+        const rest = fromLoop(prev.s, to);
+        return joins(s, kept, rest) ? [...kept, ...rest] : undefined;
+      }
+      prev = { i, s: here };
+    }
+    return undefined;
+  }
+
   private go(s: Sprite, to: SlotRef, lap = false): void {
     const same = (a: SlotRef, b: SlotRef) => a.zone === b.zone && a.slot === b.slot;
     // Riding along the dock belt and given a different spot further along it: just stop there instead.
@@ -379,6 +405,15 @@ export class Scene {
     const onward = hop && into.kind === 'crane' ? onwardFrom(s.currentTo.zone, into.pickupS, to) : [];
     if (hop && into.kind === 'crane' && hop.x === into.pos.x && hop.y === into.pos.y && joins(s, s.path.slice(0, craneAt), onward) && this.craneFor(s.currentTo.zone).cancel(this.idOf(s))) {
       s.path = [...s.path.slice(0, craneAt), ...onward];
+      s.next = undefined;
+      s.currentTo = to;
+      s.at = to;
+      return;
+    }
+    // Still riding the loop towards another zone, and the new zone's turn-off is coming up first: take it.
+    const early = s.currentTo.zone !== to.zone ? this.turnOffAhead(s, to) : undefined;
+    if (early) {
+      s.path = early;
       s.next = undefined;
       s.currentTo = to;
       s.at = to;

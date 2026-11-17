@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { NET } from '../web/belts';
+import { LOOP, NET } from '../web/belts';
 import { Scene } from '../web/scene';
 import { WAREHOUSE_X } from '../web/warehouse';
 import type { CrateView } from '../src/shared/types';
@@ -178,6 +178,27 @@ describe('crates never drive through each other', () => {
       expect(overlapFrames, worstPair).toBe(0);
     });
   }
+});
+
+describe('rerouting on the loop', () => {
+  it('a crate heading for the dock that ends before passing storage turns off there instead of lapping', () => {
+    const scene = new Scene();
+    const c = crate('a', 'working', 1);
+    scene.setCrates([c], 1000);
+    step(scene, 20);
+    scene.setCrates([{ ...c, zone: 'dock', zoneSince: 2 }], 2000);
+    const ahead = (target: number) => (target - LOOP.project(sprite(scene, 'a')) + LOOP.total) % LOOP.total;
+    step(scene, 60, () => sprite(scene, 'a').path[0]?.track === LOOP && ahead(NET.storage.entryLoopS) > 40 && ahead(NET.storage.entryLoopS) < ahead(NET.dock.entryLoopS));
+    expect(sprite(scene, 'a').path[0]?.track).toBe(LOOP);
+    const toStorage = ahead(NET.storage.entryLoopS);
+
+    scene.setCrates([{ ...c, zone: 'storage', zoneSince: 3 }], 3000);
+    const s = sprite(scene, 'a');
+    expect(usesDockBelt(s)).toBe(false);
+    const pts = [{ x: s.x, y: s.y }, ...route(s)] as { x: number; y: number }[];
+    const length = pts.slice(1).reduce((sum, p, i) => sum + Math.hypot(p.x - pts[i].x, p.y - pts[i].y), 0);
+    expect(length).toBeLessThan(toStorage + 400);
+  });
 });
 
 describe('piles', () => {
