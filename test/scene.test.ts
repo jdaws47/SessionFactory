@@ -258,6 +258,48 @@ describe('freight train and warehouse', () => {
   type Stage = Sprite & { stage?: string; at: { zone: string; slot: number } };
   const st = (scene: Scene, id: string) => (scene as unknown as { sprites: Map<string, Stage> }).sprites.get(id)!;
 
+  it('crates in the wagon stack like a pile: the one loaded last sits on top, in front', () => {
+    const scene = new Scene();
+    const a = crate('A', 'dock', 100);
+    const b = crate('B', 'storage', 100);
+    scene.setCrates([a, b], 1000);
+    step(scene, 10);
+    scene.setCrates([{ ...a, archived: true, archivedAt: 2000 }, { ...b, archived: true, archivedAt: 2001 }], 2000);
+    step(scene, 120, () => scene.train.cargo.length === 2);
+    const [first, last] = scene.train.cargo;
+    expect(st(scene, last).y).toBeLessThan(st(scene, first).y);
+    const order = (scene as unknown as { drawOrder(): [string, unknown][] }).drawOrder().map(([id]) => id);
+    expect(order.indexOf(last)).toBeGreaterThan(order.indexOf(first));
+
+    // At the warehouse the gantry unloads from the top: last loaded, first off.
+    const stored: string[] = [];
+    step(scene, 180, () => {
+      for (const id of [first, last]) if (st(scene, id).stage === 'yard' && !stored.includes(id)) stored.push(id);
+      return stored.length === 2;
+    });
+    expect(stored).toEqual([last, first]);
+  });
+
+  it('recalled crates come off the wagon at the factory from the top: last loaded, first off', () => {
+    const scene = new Scene();
+    const a = { ...crate('A', 'storage', 1), archived: true, archivedAt: 5 };
+    const b = { ...crate('B', 'storage', 2), archived: true, archivedAt: 6 };
+    scene.setCrates([a, b], 1000);
+    scene.panTo('warehouse');
+    scene.setCrates([{ ...a, archived: false }, { ...b, archived: false }], 2000);
+    step(scene, 240, () => scene.train.cargo.length === 2 && scene.train.heading < 0);
+    const loaded = [...scene.train.cargo];
+    expect(loaded).toHaveLength(2);
+    const freight = (scene as unknown as { cranes: { freight: { holding: string | null } } }).cranes.freight;
+    let firstOff: string | null = null;
+    step(scene, 60, () => (firstOff = freight.holding) !== null);
+    expect(firstOff).toBe(loaded[1]);
+    // ...and the train stays until the other one is off too.
+    step(scene, 120, () => !scene.train.cargo.length);
+    expect(scene.train.cargo).toEqual([]);
+    expect(scene.train.atFactory).toBe(true);
+  });
+
   it('archived crates ride the train to the warehouse and get stacked; bringing one back reverses the trip', () => {
     const scene = new Scene();
     let a = crate('A', 'dock', 100);

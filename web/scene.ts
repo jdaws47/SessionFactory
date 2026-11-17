@@ -677,7 +677,11 @@ export class Scene {
 
     const onTheWay = [...this.sprites.values()].some((s) => s.leaving && !s.stage);
     if (train.atFactory) {
-      for (const id of train.cargo.filter((cid) => this.sprites.get(cid)?.returning)) {
+      // Unload from the top of the wagon's pile, one crate at a time: the next comes off once the last one has been
+      // lifted out (its crane hop is done).
+      const lifting = [...this.sprites.values()].some((s) => !s.stage && s.path[0]?.crane === 'freight' && Math.hypot(s.x - FREIGHT.wagon.x, s.y - FREIGHT.wagon.y) < 30);
+      const top = [...train.cargo].reverse().find((cid) => this.sprites.get(cid)?.returning);
+      for (const id of lifting || !top ? [] : [top]) {
         // Home: the freight crane lifts it out of the wagon onto the belt, and it heads for its spot.
         const s = this.sprites.get(id)!;
         Object.assign(s, { stage: undefined, returning: false, leaving: false, wagonSlot: undefined });
@@ -690,11 +694,13 @@ export class Scene {
       const wagonBusy = [...this.sprites.entries()].some(([id, s]) => !s.stage && (this.heldBy(id) === this.cranes.freight || Math.hypot(s.x - FREIGHT.wagon.x, s.y - FREIGHT.wagon.y) < 12));
       const fetchWaiting = [...this.sprites.values()].some((s) => s.stage === 'yard' && s.returning);
       const work = train.cargo.length > 0 || fetchWaiting;
-      if (!onTheWay && !wagonBusy && ((work && train.idle > TRAIN_DWELL) || (!work && this.onWarehouse))) train.goTo('warehouse');
+      const stillUnloading = train.cargo.some((cid) => this.sprites.get(cid)?.returning);
+      if (!onTheWay && !wagonBusy && !stillUnloading && ((work && train.idle > TRAIN_DWELL) || (!work && this.onWarehouse))) train.goTo('warehouse');
     }
 
     if (train.atWarehouse) {
-      for (const id of train.cargo) {
+      // Unload from the top of the wagon's pile: last loaded, first off.
+      for (const id of [...train.cargo].reverse()) {
         const s = this.sprites.get(id)!;
         if (s.returning || this.gantryJobs.has(id)) continue;
         this.stacks.place(id);
@@ -765,6 +771,8 @@ export class Scene {
     const key = ([id, s]: [string, Sprite]) => {
       const w = s.stage === 'yard' && !this.heldBy(id) ? this.stacks.where(id) : undefined;
       if (w) return stackSpot(w.index, 0).y + w.level * 0.01;
+      // Crates in the wagon pile up too: the floor of the wagon, then loading order (last loaded in front).
+      if (s.stage === 'cargo' && !this.heldBy(id)) return TRAIN.wagonY + (s.wagonSlot ?? 0) * 0.01;
       // Crates resting in a factory pile share its spot's depth, so the pile's own order (last placed in front) decides.
       const resting = !s.stage && !s.leaving && !s.path.length && !s.next && !this.heldBy(id);
       return resting ? NET[s.at.zone].slots[s.at.slot].pos.y : s.y;
