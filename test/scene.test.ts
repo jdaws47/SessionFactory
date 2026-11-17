@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NET } from '../web/belts';
 import { Scene } from '../web/scene';
+import { WAREHOUSE_X } from '../web/warehouse';
 import type { CrateView } from '../src/shared/types';
 
 function crate(id: string, zone: CrateView['zone'], zoneSince: number): CrateView {
@@ -216,6 +217,42 @@ describe('freight train and warehouse', () => {
     scene.panTo('factory');
     step(scene, 30, () => scene.train.atFactory);
     expect(scene.train.atFactory).toBe(true);
+  });
+
+  it('when the train leaves the warehouse with a recalled crate, the view follows it home', () => {
+    const scene = new Scene();
+    const followed: string[] = [];
+    scene.onFollowTrain = (where) => {
+      followed.push(where);
+      scene.panTo(where);
+    };
+    const old = { ...crate('old', 'storage', 1), archived: true, archivedAt: 5 };
+    scene.setCrates([old], 1000);
+    scene.panTo('warehouse');
+    scene.setCrates([{ ...old, archived: false }], 2000);
+    step(scene, 120, () => scene.train.heading < 0);
+    expect(followed).toEqual([]);
+    step(scene, 120, () => followed.length > 0);
+    expect(followed).toEqual(['factory']);
+    // Only once most of the train has crossed onto the factory page.
+    expect(scene.train.x).toBeLessThan(WAREHOUSE_X);
+    expect(scene.train.x).toBeGreaterThan(WAREHOUSE_X - 10);
+    expect(scene.onWarehouse).toBe(false);
+  });
+
+  it('a train leaving the factory is never followed', () => {
+    const scene = new Scene();
+    const followed: string[] = [];
+    scene.onFollowTrain = (where) => followed.push(where);
+    const c = crate('done', 'storage', 1);
+    scene.setCrates([c], 1000);
+    step(scene, 60);
+    scene.setCrates([{ ...c, archived: true, archivedAt: 5 }], 2000);
+    let left = false;
+    step(scene, 120, () => (left ||= scene.train.moving && scene.train.heading > 0) && scene.train.atWarehouse);
+    expect(left).toBe(true);
+    expect(followed).toEqual([]);
+    expect(scene.onWarehouse).toBe(false);
   });
 
   it('crates archived before the page loaded are already on the stacks', () => {

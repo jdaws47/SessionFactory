@@ -90,6 +90,7 @@ canvas.addEventListener(
 );
 
 ui.onPan = (where) => scene.panTo(where);
+scene.onFollowTrain = (where) => (where === 'factory' ? ui.showFactory() : ui.openWarehouse());
 ui.onSearch = (q) => (scene.highlight = q);
 
 window.addEventListener('resize', resize);

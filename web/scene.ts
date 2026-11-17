@@ -256,6 +256,11 @@ export class Scene {
     }
   }
 
+  /** Called when the view should follow the train (set by main so the UI updates too). */
+  onFollowTrain?: (where: 'factory' | 'warehouse') => void;
+  /** A recalled crate's train has left the warehouse while you watched; follow it once it crosses the page edge. */
+  private followHome = false;
+
   panTo(where: 'factory' | 'warehouse'): void {
     this.camTarget = where === 'factory' ? 0 : WAREHOUSE_X;
   }
@@ -636,9 +641,19 @@ export class Scene {
       if (!this.gantry.busy && !this.gantryJobs.size) {
         // Crates coming home, or archived crates waiting at the freight station, call it back; otherwise an idle
         // train simply follows you to whichever page you're looking at.
-        const needed = train.cargo.some((id) => this.sprites.get(id)?.returning) || onTheWay;
-        if ((needed && train.idle > TRAIN_DWELL) || (!train.cargo.length && !this.onWarehouse)) train.goTo('factory');
+        const bringingBack = train.cargo.some((id) => this.sprites.get(id)?.returning);
+        const needed = bringingBack || onTheWay;
+        if ((needed && train.idle > TRAIN_DWELL) || (!train.cargo.length && !this.onWarehouse)) {
+          train.goTo('factory');
+          // Recalls are usually one at a time: follow the crate home (once the train is mostly off this page).
+          this.followHome = bringingBack && this.onWarehouse;
+        }
       }
+    }
+    if (this.followHome && (!this.onWarehouse || train.heading >= 0)) this.followHome = false;
+    if (this.followHome && train.x < WAREHOUSE_X) {
+      this.followHome = false;
+      this.onFollowTrain?.('factory');
     }
 
     this.gantry.update(dt, {
