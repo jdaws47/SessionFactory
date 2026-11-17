@@ -64,8 +64,8 @@ interface Sprite {
 }
 
 const LOAD_SECONDS = 0.8;
-/** Seconds the train waits at each end before moving, so more crates can gather for each trip. */
-const TRAIN_DWELL = 10;
+/** Seconds the train waits after its last crate is loaded (or unloaded) before setting off. */
+const TRAIN_DWELL = 1;
 const PATIENCE = 2.5;
 const LOAD_DROP = 6;
 
