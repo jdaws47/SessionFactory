@@ -111,3 +111,26 @@ describe('ready-to-ship hint', () => {
     expect(reg.view(2)[0].readyToShip).toMatch(/Done/);
   });
 });
+
+describe('Jira status on archived crates', () => {
+  it('a ticket that moves after archiving marks the crate returned, without unarchiving it', () => {
+    reg.ingest(ev({ kind: 'prompt', sessionId: 'a', prompt: 'TF-1' }));
+    const id = reg.all()[0].id;
+    reg.setJira(id, { status: 'Done', resolved: true }, 1);
+    reg.archive(id, 2);
+    reg.setJira(id, { status: 'Done', resolved: true }, 3);
+    expect(reg.get(id)?.returned).toBeUndefined();
+    reg.setJira(id, { status: 'Reopened', resolved: false }, 4);
+    expect(reg.get(id)?.returned?.reason).toBe('ticket moved to Reopened');
+    expect(reg.get(id)?.archived).toBe(true);
+  });
+
+  it('uses the first status seen after archiving as the baseline when none was known', () => {
+    reg.ingest(ev({ kind: 'prompt', sessionId: 'a', prompt: 'TF-2' }));
+    const id = reg.all()[0].id;
+    reg.archive(id, 1);
+    reg.setJira(id, { status: 'In Review', resolved: false }, 2);
+    expect(reg.get(id)?.returned).toBeUndefined();
+    expect(reg.get(id)?.jira?.statusAtArchive).toBe('In Review');
+  });
+});

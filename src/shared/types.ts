@@ -55,7 +55,7 @@ export interface FactoryState {
   now: number;
   crates: CrateView[];
   cleanRoot: string;
-  features: { terminals: boolean; jira: boolean };
+  features: { terminals: boolean; jira: boolean; jiraHost?: string };
 }
 
 export interface JiraTicket {

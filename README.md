@@ -35,6 +35,13 @@ The Warehouse can **Resume** an archived session or start a **New session, same 
 
 In the terminal, Shift+drag selects text; tmux has the mouse otherwise.
 
+## Jira
+
+If the server starts in a shell that has run `scrub-in` (so the `JIRA_*` variables are set), **+ New session** and the hopper list your unresolved assigned tickets. **Start** opens a factory terminal primed with the ticket, and its crate carries the key. Every 5 minutes the server reads ticket statuses (read-only, through `.claude/skills/vida-jira/atlassian_cli.py`):
+
+- A ticket that's resolved puts a **SHIP?** tag on its crate. It never archives anything.
+- An archived crate whose ticket moves (reopened, back in progress…) lights up in the Warehouse and the "Returned" inbox. You decide whether to bring it back.
+
 ## How it sees your sessions
 
 Observe-only hooks in `clean-room/.claude/settings.local.json` run `hooks/emit-event`. The script writes each hook event into `data/events/` and exits 0 without printing anything. The app reads nothing outside `clean-room/`.

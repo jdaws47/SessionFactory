@@ -46,6 +46,7 @@ src/server/
   labels.ts           Repo, Jira-key and label derivation; clean-room boundary check
   registry.ts         Persistent crate store (data/registry.json), session linking, archive, liveness
   ingest.ts           Drains data/events/ into the registry (fs.watch + polling)
+  jira.ts             Read-only Jira via the vida-jira CLI (assigned tickets, statuses); never writes
   terminals.ts        tmux bridge: start/kill factory terminals, attach via node-pty; claudeCommand() builds the scrub-in line
   http.ts             Localhost-only HTTP + websocket server (Host/Origin checked)
   main.ts             Wiring, REST routes, state broadcast
@@ -85,6 +86,7 @@ npx vitest run test/machine.test.ts
 - **Only Archive takes a crate off the floor.** Process exit, timeouts and Jira status only move a crate to Storage or add a "ready to ship" hint. Nothing deletes crates.
 - **The hooks are observe-only.** `emit-event` must never print, never exit non-zero, and never make a decision.
 - **Never touch other Claude config.** The only allowed config change is the `hooks` key in `clean-room/.claude/settings.local.json`; any other change must be flagged to the user first.
+- **Jira is read-only.** Only `search` through the vida-jira CLI; no transitions, comments or edits.
 - **Localhost only.** Bind `127.0.0.1` and keep the Host/Origin checks in `http.ts`; the terminal websocket is a shell.
 - **Claude only starts from clean-room, after scrub-in.** Every launch goes through `claudeCommand()` or `bin/sf`, and only on a user click.
 - **Never auto-run scrub-in in tests or smoke checks.** It logs out of AWS SSO and switches repos to `main`; test the bridge with a harmless command instead.

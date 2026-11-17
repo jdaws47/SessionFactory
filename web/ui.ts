@@ -1,5 +1,5 @@
-import type { CrateView, FactoryState } from '../src/shared/types';
-import { post } from './api';
+import type { CrateView, FactoryState, JiraTicket } from '../src/shared/types';
+import { get, post } from './api';
 import { repoColor } from './scene';
 import { AttachedTerminal } from './terminal';
 
@@ -7,12 +7,6 @@ export interface Action {
   label: string;
   kind?: 'primary' | 'danger' | 'plain';
   run: () => void | Promise<void>;
-}
-
-/** Hooks later features use to add UI without the core knowing about them. */
-export interface UiExtensions {
-  warehouseActions: Array<(c: CrateView, state: FactoryState) => Action | null>;
-  newSessionExtras: Array<(state: FactoryState) => string>;
 }
 
 export function esc(text: unknown): string {
@@ -44,7 +38,6 @@ const ZONE_NAMES: Record<string, string> = {
 };
 
 export class Ui {
-  readonly ext: UiExtensions = { warehouseActions: [], newSessionExtras: [] };
   private state: FactoryState | null = null;
   private connected = false;
   private selected: string | null = null;
@@ -296,7 +289,7 @@ export class Ui {
           <div class="cw-label" title="Rename" ${rename}>${esc(c.label)} <span class="pencil">✎</span></div>
           <div class="cw-meta">
             <span class="chip zone-${c.zone}">${esc(c.repo)}</span>
-            ${c.jiraKey && c.jiraKey !== c.label ? `<span class="chip">${esc(c.jiraKey)}</span>` : ''}
+            ${c.jiraKey ? this.jiraChip(c, s) : ''}
             ${c.readyToShip ? `<span class="chip ship">ready to ship · ${esc(c.readyToShip)}</span>` : ''}
             <span class="dim">${esc(meta.join(' · '))}</span>
           </div>
@@ -307,6 +300,13 @@ export class Ui {
         <button class="icon" title="${this.fullScreen ? 'Exit full screen' : 'Full screen'}" ${toggleFull}>${this.fullScreen ? '⤡' : '⤢'}</button>
         <button class="icon" title="Close (the terminal keeps running)" ${this.act(() => this.select(null))}>✕</button>
       </div>`;
+  }
+
+  private jiraChip(c: CrateView, s: FactoryState): string {
+    const text = `${c.jiraKey}${c.jira?.status ? ` · ${c.jira.status}` : ''}`;
+    return s.features.jiraHost
+      ? `<a class="chip link" href="${esc(`${s.features.jiraHost}/browse/${c.jiraKey}`)}" target="_blank" rel="noreferrer">${esc(text)} ↗</a>`
+      : `<span class="chip">${esc(text)}</span>`;
   }
 
   private windowInfo(c: CrateView, s: FactoryState): string {
@@ -369,13 +369,41 @@ export class Ui {
       <div class="dialog">
         <header><h2>New session</h2><button class="icon" ${this.act(close)}>✕</button></header>
         <p class="dim">Opens a factory terminal in clean-room that runs <code>scrub-in</code>, then <code>claude</code>.</p>
-        ${this.ext.newSessionExtras.map((f) => f(s)).join('')}
+        ${s.features.jira ? `<section class="hopper"><div class="hopper-head"><h3>Your Jira tickets</h3><button class="icon" title="Refresh" ${this.act(() => this.loadTickets(true))}>↻</button></div><div id="ns-tickets" class="tickets"><div class="dim">Loading tickets…</div></div></section><div class="or"><span>or start blank</span></div>` : ''}
         <label>Name <span class="dim">(optional)</span><input id="ns-label" placeholder="e.g. warm runners" /></label>
         <label>First prompt <span class="dim">(optional)</span><textarea id="ns-prompt" rows="4" placeholder="What should Claude start on?"></textarea></label>
         <div class="row end"><button class="btn plain" ${this.act(close)}>Cancel</button><button class="btn primary" ${start}>Start</button></div>
       </div>`;
     this.modal.hidden = false;
     (document.getElementById('ns-label') as HTMLInputElement).focus();
+    if (s.features.jira) void this.loadTickets(false);
+  }
+
+  private async loadTickets(refresh: boolean): Promise<void> {
+    const box = document.getElementById('ns-tickets');
+    if (!box) return;
+    box.innerHTML = '<div class="dim">Loading tickets…</div>';
+    try {
+      const { tickets } = await get<{ tickets: (JiraTicket & { onFloor: boolean })[] }>(`/api/jira/assigned${refresh ? '?refresh=1' : ''}`);
+      if (!document.getElementById('ns-tickets')) return;
+      box.innerHTML = tickets.length
+        ? tickets
+            .map((t) => {
+              const start = this.act(async () => {
+                const { crateId } = await post<{ crateId: string }>(`/api/jira/${encodeURIComponent(t.key)}/start`);
+                this.modal.hidden = true;
+                this.select(crateId);
+              });
+              return `<div class="ticket">
+                <div class="ticket-text"><b>${esc(t.key)}</b> <span class="chip">${esc(t.status)}</span>${t.onFloor ? ' <span class="chip ship">on the floor</span>' : ''}<div>${esc(t.summary)}</div></div>
+                <button class="btn primary" ${start}>Start</button>
+              </div>`;
+            })
+            .join('')
+        : '<div class="dim">No unresolved tickets assigned to you.</div>';
+    } catch (err) {
+      box.innerHTML = `<div class="error">Couldn't load tickets: ${esc((err as Error).message)}</div>`;
+    }
   }
 
   private renderInbox(): void {
@@ -465,7 +493,6 @@ export class Ui {
             { label: 'New session, same label', run: () => this.continueLabel(c) },
           ]
         : [{ label: 'Copy resume cmd', run: () => this.copy(resumeCommand(c, s.cleanRoot), 'Resume command') }]),
-      ...this.ext.warehouseActions.map((f) => f(c, s)).filter((a): a is Action => !!a),
     ];
     return `<article class="wh-card ${c.returned ? 'returned' : ''}">
       <div class="wh-top"><span class="dot" style="background:${repoColor(c.repo)}"></span>${esc(c.repo)}

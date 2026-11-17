@@ -4,6 +4,7 @@ import type { Crate, FactoryState } from '../shared/types';
 import { CLEAN_ROOT, DIST_DIR, EVENTS_DIR, HOST, PORT, REGISTRY_FILE, REPO_DIR, RUN_DIR } from './config';
 import { FactoryServer, HttpError } from './http';
 import { EventIngestor } from './ingest';
+import { Jira, JIRA_KEY_RE } from './jira';
 import { snippet } from './labels';
 import { Registry } from './registry';
 import { claudeCommand, newSlot, SLOT_RE, Terminals } from './terminals';
@@ -21,6 +22,7 @@ const registry = new Registry(REGISTRY_FILE, CLEAN_ROOT);
 const ingestor = new EventIngestor(EVENTS_DIR, registry);
 const terminalsAvailable = await Terminals.available();
 const terminals = new Terminals(path.join(RUN_DIR, 'tmux.sock'), path.join(REPO_DIR, 'tmux.conf'), CLEAN_ROOT);
+const jira = new Jira(path.join(CLEAN_ROOT, '.claude', 'skills', 'vida-jira', 'atlassian_cli.py'));
 const allowedHosts = [`127.0.0.1:${PORT}`, `localhost:${PORT}`, '127.0.0.1:5173', 'localhost:5173'];
 const app = new FactoryServer(DIST_DIR, allowedHosts);
 const clients = new Set<WebSocket>();
@@ -31,7 +33,7 @@ function state(): FactoryState {
     now,
     crates: registry.view(now, terminals.liveSlots),
     cleanRoot: CLEAN_ROOT,
-    features: { terminals: terminalsAvailable, jira: false },
+    features: { terminals: terminalsAvailable, jira: jira.configured, jiraHost: jira.configured ? jira.host : undefined },
   };
 }
 
@@ -120,6 +122,43 @@ app.route('POST', '/api/crates/:id/continue', async (_b, { id }) => {
   return startNew({ label: crate.labelSource === 'manual' || crate.title ? crate.label : undefined, jiraKey: crate.jiraKey, prompt: parts.join(' ') });
 });
 
+function requireJira(): void {
+  if (!jira.configured) throw new HttpError(501, 'Jira is not configured: start the server from a shell that has run scrub-in (JIRA_* variables).');
+}
+
+app.route('GET', '/api/jira/assigned', async (_b, _p, query) => {
+  requireJira();
+  const tickets = await jira.assigned(query.get('refresh') === '1');
+  const onFloor = new Set(registry.all().filter((c) => !c.archived && c.jiraKey).map((c) => c.jiraKey));
+  return { tickets: tickets.map((t) => ({ ...t, onFloor: onFloor.has(t.key) })) };
+});
+
+/** Turn a Jira ticket into a crate: a factory terminal primed with the ticket. */
+app.route('POST', '/api/jira/:key/start', async (_b, { key }) => {
+  requireJira();
+  if (!JIRA_KEY_RE.test(key)) throw new HttpError(400, 'not a Jira key');
+  const ticket = (await jira.assigned()).find((t) => t.key === key);
+  const prompt = `Let's work on ${key}${ticket ? `: ${ticket.summary}` : ''}. Start by pulling up the ticket with /vida-jira ${key}.`;
+  return startNew({ jiraKey: key, prompt });
+});
+
+/** Read-only status poll; drives the "ready to ship" and "returned" markers. Never archives anything. */
+async function pollJira(): Promise<void> {
+  if (!jira.configured) return;
+  const crates = registry.all().filter((c) => c.jiraKey);
+  if (!crates.length) return;
+  try {
+    const statuses = await jira.statuses(crates.map((c) => c.jiraKey!));
+    const now = Date.now();
+    for (const c of crates) {
+      const st = statuses.get(c.jiraKey!);
+      if (st) registry.setJira(c.id, st, now);
+    }
+  } catch (err) {
+    console.warn(`Jira poll failed: ${(err as Error).message}`);
+  }
+}
+
 app.socket('/ws', (ws) => {
   clients.add(ws);
   ws.on('close', () => clients.delete(ws));
@@ -154,14 +193,19 @@ await terminals.refresh();
 const liveness = setInterval(() => registry.checkLiveness(isAlive, Date.now()), 5000);
 const slotWatch = setInterval(() => void terminals.refresh().then((changed) => changed && broadcast()), 2000);
 const tick = setInterval(broadcast, 30_000);
+const jiraPoll = setInterval(() => void pollJira(), 5 * 60_000);
+setTimeout(() => void pollJira(), 5000);
 
 await app.listen(PORT, HOST);
-console.log(`Session Factory running at http://${HOST}:${PORT}${terminalsAvailable ? '' : ' (tmux not found: terminals disabled)'}`);
+console.log(`Session Factory running at http://${HOST}:${PORT}`);
+if (!terminalsAvailable) console.log('  tmux not found: factory terminals disabled');
+if (!jira.configured) console.log('  Jira not configured (no JIRA_*/ATLASSIAN_* env): run scrub-in in this shell first to enable the ticket hopper');
 
 function shutdown(): void {
   clearInterval(liveness);
   clearInterval(slotWatch);
   clearInterval(tick);
+  clearInterval(jiraPoll);
   ingestor.stop();
   registry.close();
   process.exit(0);

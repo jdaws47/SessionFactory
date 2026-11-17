@@ -125,8 +125,20 @@ export class Registry {
     this.update(id, (c) => (c.archived && !c.returned ? { ...c, returned: { reason, at: now } } : c));
   }
 
+  /**
+   * Records the latest Jira status. For archived crates the status at archive time is the baseline;
+   * any later change (reopened, moved on) marks the crate as returned. It is never unarchived here.
+   */
   setJira(id: string, info: Pick<JiraInfo, 'status' | 'resolved'>, now: number): void {
-    this.update(id, (c) => ({ ...c, jira: { ...c.jira, ...info, checkedAt: now } }));
+    this.update(id, (c) => {
+      const next: Crate = { ...c, jira: { ...c.jira, ...info, checkedAt: now } };
+      if (c.archived && info.status) {
+        const baseline = c.jira?.statusAtArchive;
+        if (!baseline) next.jira = { ...next.jira, statusAtArchive: info.status };
+        else if (baseline !== info.status && !c.returned) next.returned = { reason: `ticket moved to ${info.status}`, at: now };
+      }
+      return next;
+    });
   }
 
   /** Moves crates whose Claude process has gone away (crash, closed terminal) into storage. */
