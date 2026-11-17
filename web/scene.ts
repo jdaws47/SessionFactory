@@ -247,10 +247,19 @@ export class Scene {
     const yard = AREAS.storage;
     for (const s of this.sprites.values()) {
       if (!s.path.length && !s.next) continue;
-      const near = ALL_TRACKS.find((t) => {
+      const target = s.path[0] ?? s.next?.path[0];
+      const heading = target ? Math.atan2(target.y - s.y, target.x - s.x) : NaN;
+      let near: Track | undefined;
+      for (const t of ALL_TRACKS) {
         const q = t.at(t.project(s));
-        return Math.hypot(q.x - s.x, q.y - s.y) < 3;
-      });
+        if (Math.hypot(q.x - s.x, q.y - s.y) >= 3) continue;
+        near ??= t;
+        // Where a branch overlaps the belt it splits from, pick the one the crate is actually travelling along.
+        if (Number.isFinite(heading) && Math.cos(q.angle - heading) > 0.7) {
+          near = t;
+          break;
+        }
+      }
       if (near) this.running.add(near);
       else if (s.x > yard.x && s.x < yard.x + yard.w && s.y > YARD.busY - 2 && s.y < yard.y + yard.h) {
         this.craneBusy = true;
@@ -576,7 +585,7 @@ function strokeTrack(ctx: CanvasRenderingContext2D, track: Track): void {
 }
 
 /** Belt body, then plates with seams travelling in the belt's own direction. Later belts cover earlier ones at joins. */
-function drawBelt(ctx: CanvasRenderingContext2D, track: Track, t: number): void {
+function drawBelt(ctx: CanvasRenderingContext2D, track: Track, travelled: number): void {
   ctx.save();
   ctx.lineJoin = 'round';
   ctx.lineCap = 'butt';
@@ -600,7 +609,7 @@ function drawBelt(ctx: CanvasRenderingContext2D, track: Track, t: number): void 
   ctx.strokeStyle = C.section;
   ctx.lineWidth = 20;
   ctx.setLineDash([26, 4]);
-  ctx.lineDashOffset = -Math.round((t / 1000) * BELT_SPEED);
+  ctx.lineDashOffset = -travelled;
   strokeTrack(ctx, track);
   ctx.restore();
 }
