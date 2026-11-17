@@ -241,9 +241,11 @@ describe('storage yard layout', () => {
     const centre = (YARD.inX + YARD.outX) / 2;
     expect((YARD.columns[0] + YARD.columns[YARD.columns.length - 1]) / 2).toBe(centre);
     const { CRATE_W } = await import('../web/layout');
+    // Crates (and lifted crates, 8% bigger) stay clear of the rails, which are 8px wide.
+    const half = (CRATE_W * 1.08) / 2;
     for (const x of YARD.columns) {
-      expect(x - CRATE_W / 2).toBeGreaterThanOrEqual(YARD.rails.left);
-      expect(x + CRATE_W / 2).toBeLessThanOrEqual(YARD.rails.right);
+      expect(x - half - (YARD.rails.left + 4)).toBeGreaterThanOrEqual(2);
+      expect(YARD.rails.right - 4 - (x + half)).toBeGreaterThanOrEqual(2);
     }
     expect((YARD.rails.left + YARD.rails.right) / 2).toBe(centre);
     const beltHalfWidth = 15;
