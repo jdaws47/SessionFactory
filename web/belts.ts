@@ -2,8 +2,8 @@ import type { Area, Point } from './layout';
 
 /** Crates and belt sections move at the same speed so items look carried. */
 export const BELT_SPEED = 200;
-export const LANE_TOP = 415;
-export const LANE_BOTTOM = 465;
+export const LANE_TOP = 405;
+export const LANE_BOTTOM = 475;
 const R = 22;
 
 export interface Pose extends Point {
@@ -146,6 +146,8 @@ export type Slot = StubSlot | TrackSlot | CraneSlot;
 export interface ZoneNet {
   /** One-way belt from the loop, through the zone, back to the loop. */
   track: Track;
+  /** The dock's recycle loop: splits off just past the front, runs back underneath, merges in at the back. */
+  recycle?: { track: Track; divergeS: number; mergeS: number };
   slots: Slot[];
   entryLoopS: number;
   exitLoopS: number;
@@ -252,16 +254,28 @@ export const MACHINE_COLUMNS = [450, 682, 914, 1146, 1378];
 
 export const HOPPER_DROP: Point = { x: 145, y: 196 };
 export const DOCK_FRONT_X = 440;
-export const DOCK_Y = 650;
+export const DOCK_Y = 630;
+export const RECYCLE_Y = 760;
+export const DOCK_IN_X = 1100;
+export const DOCK_OUT_X = 330;
 
 /**
- * The loading dock: one queue belt that leaves past the front. It is an accumulation conveyor (one section
- * per spot), so a crate joining the back never moves the ones in front.
+ * The loading dock: in-leg down from the loop, a queue running left past the operator, out-leg back up.
+ * A recycle loop splits off just past the front, runs back under the queue and merges in at the back, so
+ * crates that must clear the way for a departure circulate inside the dock instead of lapping the main loop.
+ * The queue is an accumulation conveyor (one section per spot).
  */
 function dockLine(): ZoneNet {
-  const z = zone(bottomZoneTrack(1100, 330, DOCK_Y), (t) => trackSlots(t, [0, 1, 2, 3, 4].map((i) => ({ x: DOCK_FRONT_X + i * 134, y: DOCK_Y }))));
+  const z = zone(bottomZoneTrack(DOCK_IN_X, DOCK_OUT_X, DOCK_Y), (t) => trackSlots(t, [0, 1, 2, 3, 4].map((i) => ({ x: DOCK_FRONT_X + i * 134, y: DOCK_Y }))));
   const spots = z.slots.map((q) => (q.kind === 'track' ? q.s : 0)).sort((a, b) => a - b);
   z.track.splits = spots.slice(1).map((v, i) => (v + spots[i]) / 2);
+  const downX = DOCK_OUT_X + 28;
+  const upX = DOCK_IN_X - 40;
+  const diverge = { x: downX + R, y: DOCK_Y };
+  const merge = { x: upX - R, y: DOCK_Y };
+  const track = new Track(rounded([diverge, { x: downX, y: DOCK_Y }, { x: downX, y: RECYCLE_Y }, { x: upX, y: RECYCLE_Y }, { x: upX, y: DOCK_Y }, merge], R));
+  z.recycle = { track, divergeS: z.track.project(diverge), mergeS: z.track.project(merge) };
+  z.junctions = [...z.junctions, { x: downX, y: DOCK_Y }, { x: upX, y: DOCK_Y }];
   return z;
 }
 
@@ -320,6 +334,7 @@ export const HOPPER_S = 0;
 /** Draw order: slot branches under zone belts, zone belts under the main loop. */
 export const ALL_TRACKS: Track[] = [
   ...Object.values(NET).flatMap((z) => z.slots.flatMap((s) => (s.kind === 'stub' ? [s.in, s.out] : []))),
+  ...Object.values(NET).flatMap((z) => (z.recycle ? [z.recycle.track] : [])),
   ...Object.values(NET).map((z) => z.track),
   LOOP,
 ];
@@ -366,11 +381,19 @@ export interface SlotRef {
 export function travel(from: SlotRef, to: SlotRef, lap = false): Waypoint[] {
   const a = NET[from.zone].slots[from.slot];
   const b = NET[to.zone].slots[to.slot];
-  if (lap) return [...leave(from.zone, from.slot), ...on(LOOP, LOOP.between(NET[from.zone].exitLoopS, NET[to.zone].entryLoopS)), ...arrive(to.zone, to.slot)];
-  if (from.zone === to.zone && from.slot === to.slot) return [b.pos];
+  if (from.zone === to.zone && from.slot === to.slot && !lap) return [b.pos];
   if (from.zone === to.zone && a.kind === 'crane' && b.kind === 'crane') return [a.pos, { ...b.pos, crane: to.zone }];
-  if (from.zone === to.zone && a.kind === 'track' && b.kind === 'track' && b.s >= a.s) {
+  if (from.zone === to.zone && a.kind === 'track' && b.kind === 'track' && b.s >= a.s && !lap) {
     return [...on(NET[to.zone].track, NET[to.zone].track.between(a.s, b.s)), b.pos];
+  }
+  if (lap && !(from.zone === to.zone && NET[to.zone].recycle)) {
+    return [...leave(from.zone, from.slot), ...on(LOOP, LOOP.between(NET[from.zone].exitLoopS, NET[to.zone].entryLoopS)), ...arrive(to.zone, to.slot)];
+  }
+  const recycle = NET[to.zone].recycle;
+  if (from.zone === to.zone && recycle && a.kind === 'track' && b.kind === 'track' && (lap || b.s < a.s)) {
+    // Round the dock's own recycle loop rather than the main loop.
+    const main = NET[to.zone].track;
+    return [...on(main, main.between(a.s, recycle.divergeS)), ...on(recycle.track, recycle.track.pts), ...on(main, main.between(recycle.mergeS, b.s)), b.pos];
   }
   return [...leave(from.zone, from.slot), ...on(LOOP, LOOP.between(NET[from.zone].exitLoopS, NET[to.zone].entryLoopS)), ...arrive(to.zone, to.slot)];
 }

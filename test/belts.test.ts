@@ -89,14 +89,20 @@ describe('belt network', () => {
     expect(dock.splits.length).toBe(NET.dock.slots.length - 1);
   });
 
-  it('a crate sent further back in the dock queue goes out and round the loop to rejoin', () => {
+  it('a crate sent further back in the dock queue circulates on the dock recycle loop, not the main loop', () => {
     const pts = travel({ zone: 'dock', slot: 0 }, { zone: 'dock', slot: 3 });
-    expect(pts.some((p) => p.track === LOOP)).toBe(true);
+    expect(pts.some((p) => p.track === NET.dock.recycle!.track)).toBe(true);
+    expect(pts.some((p) => p.track === LOOP)).toBe(false);
   });
 
-  it('a crate clearing the way laps the loop even when it comes back to the same spot', () => {
+  it('crates going opposite ways on the main loop never overlap', async () => {
+    const { CRATE_H } = await import('../web/layout');
+    expect(LANE_BOTTOM - LANE_TOP).toBeGreaterThanOrEqual(CRATE_H + 10);
+  });
+
+  it('a crate clearing the way circulates even when it comes back to the same spot', () => {
     const pts = travel({ zone: 'dock', slot: 0 }, { zone: 'dock', slot: 0 }, true);
-    expect(pts.some((p) => p.track === LOOP)).toBe(true);
+    expect(pts.some((p) => p.track === NET.dock.recycle!.track)).toBe(true);
     expect(pts[pts.length - 1]).toEqual(NET.dock.slots[0].pos);
   });
 

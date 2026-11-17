@@ -47,7 +47,8 @@ export const AREAS: Record<Area, AreaDef> = {
 /** The hopper's mouth sits just above where new crates land on the intake belt (belts.HOPPER_DROP). */
 export const HOPPER: Rect = { x: 85, y: 88, w: 120, h: 84 };
 export const TRAIN_Y = 808;
-export const OPERATOR: Point = { x: 440, y: 752 };
+/** The operator stands between the dock queue and its recycle belt, at the front. */
+export const OPERATOR: Point = { x: 440, y: 700 };
 
 export function inRect(p: Point, r: Rect): boolean {
   return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
