@@ -1,6 +1,7 @@
 import type { CrateView } from '../src/shared/types';
-import { ALL_TRACKS, BELT_SPEED, DOCK_END, FREIGHT_LOAD, fromHopper, HOPPER_DROP, JUNCTIONS, LOOP, NET, type SlotRef, type Track, travel, type Waypoint, YARD } from './belts';
+import { ALL_TRACKS, BELT_SPEED, FREIGHT_LOAD, fromHopper, HOPPER_DROP, JUNCTIONS, LOOP, NET, type SlotRef, type Track, travel, type Waypoint, YARD } from './belts';
 import { AREAS, type Area, CRATE_H, CRATE_W, floorArea, H, HOPPER, OPERATOR, type Point, TRAIN_Y, W } from './layout';
+import { reorderQueue } from './queue';
 import { squircleAt, squirclePath } from './shapes';
 
 const C = {
@@ -129,6 +130,8 @@ export class Scene {
   private beltOffset = new Map<string, number>();
   private running = new Set<string>([sectionKey(LOOP, 0)]);
   /** Where the storage crane's trolley is; it stays where it last put something down. */
+  /** Physical order of crates on the dock belt, front first. */
+  private dockQueue: string[] = [];
   private crane: Point = { x: (YARD.rails.left + YARD.rails.right) / 2, y: YARD.rails.top + 10 };
   private craneBusy = false;
 
@@ -148,13 +151,18 @@ export class Scene {
       byZone.set(area, [...(byZone.get(area) ?? []), c]);
     }
 
+    const docked = [...(byZone.get('dock') ?? [])].sort((a, b) => a.zoneSince - b.zoneSince);
+    const reordered = reorderQueue(this.dockQueue, new Set(docked.map((c) => c.id)), docked.map((c) => c.id));
+    this.dockQueue = reordered.queue;
+    const loopers = new Set(reordered.loopers);
+
     for (const [zone, list] of byZone) {
       const assigned = QUEUE_ZONES.has(zone) ? this.queueSlots(zone, list) : this.stickySlots(zone, list);
       const piles = new Map<number, CrateView[]>();
       for (const c of list) piles.set(assigned.get(c.id)!, [...(piles.get(assigned.get(c.id)!) ?? []), c]);
       for (const [slot, pile] of piles) {
         pile.sort((a, b) => b.zoneSince - a.zoneSince);
-        pile.forEach((c, rank) => this.place(c, { zone, slot }, first, rank, pile.length));
+        pile.forEach((c, rank) => this.place(c, { zone, slot }, first, rank, pile.length, loopers.has(c.id)));
       }
     }
 
@@ -170,10 +178,14 @@ export class Scene {
     }
   }
 
-  /** Dock and intake are queues on the belt itself: order decides position, the back of the queue piles up. */
+  /**
+   * Dock and intake are queues on the belt itself: order decides position, the back of the queue piles up.
+   * The dock keeps its physical order, so crates that looped round to let one out stay at the back.
+   */
   private queueSlots(zone: Area, list: CrateView[]): Map<string, number> {
     const cap = NET[zone].slots.length;
-    const ordered = [...list].sort((a, b) => (zone === 'dock' ? a.zoneSince - b.zoneSince : a.startedAt - b.startedAt));
+    const rank = new Map(this.dockQueue.map((id, i) => [id, i]));
+    const ordered = [...list].sort((a, b) => (zone === 'dock' ? (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0) : a.startedAt - b.startedAt));
     return new Map(ordered.map((c, i) => [c.id, Math.min(i, cap - 1)]));
   }
 
@@ -200,7 +212,7 @@ export class Scene {
     return out;
   }
 
-  private place(c: CrateView, to: SlotRef, instant: boolean, pileRank: number, pileSize: number): void {
+  private place(c: CrateView, to: SlotRef, instant: boolean, pileRank: number, pileSize: number, lap = false): void {
     let s = this.sprites.get(c.id);
     if (!s) {
       const pos = NET[to.zone].slots[to.slot].pos;
@@ -226,17 +238,17 @@ export class Scene {
     }
     s.pileRank = pileRank;
     s.pileSize = pileSize;
-    if (s.at.zone !== to.zone || s.at.slot !== to.slot) this.go(s, to);
+    if (lap || s.at.zone !== to.zone || s.at.slot !== to.slot) this.go(s, to, lap);
   }
 
   /** Sends a sprite to a slot along the belts, after finishing the trip it is already on. */
-  private go(s: Sprite, to: SlotRef): void {
+  private go(s: Sprite, to: SlotRef, lap = false): void {
     const same = (a: SlotRef, b: SlotRef) => a.zone === b.zone && a.slot === b.slot;
     if (!s.path.length && !s.next) {
-      s.path = travel(s.currentTo, to);
+      s.path = travel(s.currentTo, to, lap);
       s.currentTo = to;
     } else {
-      s.next = same(s.currentTo, to) ? undefined : { path: travel(s.currentTo, to), to };
+      s.next = same(s.currentTo, to) && !lap ? undefined : { path: travel(s.currentTo, to, lap), to };
     }
     s.at = to;
   }
@@ -317,7 +329,6 @@ export class Scene {
     this.drawStatic(ctx, opts.pixelRatio);
     for (const track of ALL_TRACKS) drawBelt(ctx, track, (i) => this.beltOffset.get(sectionKey(track, i)) ?? 0);
     for (const j of JUNCTIONS) junction(ctx, j);
-    endStop(ctx, DOCK_END);
     this.drawHopper(ctx, opts.terminals);
     this.drawTrain(ctx, t);
     drawOperator(ctx);
@@ -610,12 +621,6 @@ function drawBelt(ctx: CanvasRenderingContext2D, track: Track, travelled: (secti
     ctx.restore();
   }
   ctx.restore();
-}
-
-/** Bumper where the dock's queue belt dead-ends at the operator. */
-function endStop(ctx: CanvasRenderingContext2D, p: Point): void {
-  fillSquircle(ctx, p.x - 8, p.y - 18, 10, 36, RADIUS.small, '#3a3e45');
-  fillSquircle(ctx, p.x - 8, p.y - 18, 3, 36, 1, C.orange);
 }
 
 /** Splitter/merger block where a zone belt meets the main loop. */
