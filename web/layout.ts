@@ -40,7 +40,7 @@ export const AREAS: Record<Area, AreaDef> = {
   intake: { x: 65, y: 36, w: 160, h: 334, title: 'INTAKE', subtitle: 'new' },
   working: { x: 290, y: 36, w: 1280, h: 334, title: 'ASSEMBLY HALL', subtitle: 'claude is working · jammed machines need you' },
   freight: { x: 30, y: 510, w: 230, h: 360, title: 'FREIGHT', subtitle: 'archive' },
-  dock: { x: 290, y: 510, w: 840, h: 360, title: 'LOADING DOCK', subtitle: 'waiting on you' },
+  dock: { x: 300, y: 510, w: 830, h: 290, title: 'LOADING DOCK', subtitle: 'waiting on you' },
   storage: { x: 1160, y: 510, w: 410, h: 360, title: 'STORAGE', subtitle: 'session ended' },
 };
 

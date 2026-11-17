@@ -883,7 +883,7 @@ function plant(g: CanvasRenderingContext2D, x: number, y: number, rnd: () => num
 }
 
 /** Title plates sit clear of the belts that enter each foundation. */
-const TITLE_INSET: Partial<Record<Area, number>> = { dock: 62, storage: 104 };
+const TITLE_INSET: Partial<Record<Area, number>> = { dock: 52, storage: 104 };
 
 function foundation(g: CanvasRenderingContext2D, key: Area, a: (typeof AREAS)[Area]): void {
   g.save();
