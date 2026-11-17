@@ -263,7 +263,7 @@ export class Scene {
   /** Whether a point (world coordinates) is on the train, wherever it is. */
   onTrain(p: Point): boolean {
     const x = this.train.x;
-    return p.x > x - 90 && p.x < x + 90 && p.y > TRAIN_Y - 36 && p.y < TRAIN_Y + 32;
+    return p.x > x - TRAIN.half && p.x < x + TRAIN.half && p.y > TRAIN_Y - 36 && p.y < TRAIN_Y + 32;
   }
 
   get onWarehouse(): boolean {
@@ -510,8 +510,10 @@ export class Scene {
         }
       }
       if (s.leaving && !s.stage && !s.path.length && !s.next && !this.heldBy(id) && this.train.atFactory) {
-        // Lowered into the wagon: it is cargo now.
+        // Lowered into the wagon: it is cargo now (and no longer part of any factory pile).
         s.stage = 'cargo';
+        s.pileRank = 0;
+        s.pileSize = 1;
         this.train.cargo.push(id);
         this.train.idle = 0;
       }
@@ -681,12 +683,15 @@ export class Scene {
       const w = s.stage === 'yard' && !this.heldBy(id) ? this.stacks.where(id) : undefined;
       return w ? stackSpot(w.index, 0).y + w.level * 0.01 : s.y;
     };
-    return [...this.sprites.entries()].sort((a, b) => key(a) - key(b) || b[1].pileRank - a[1].pileRank);
+    // Crates on a crane are in the air: they always draw above the crates they pass over.
+    const lifted = ([id]: [string, Sprite]) => (this.heldBy(id) ? 1 : 0);
+    return [...this.sprites.entries()].sort((a, b) => lifted(a) - lifted(b) || key(a) - key(b) || b[1].pileRank - a[1].pileRank);
   }
 
   private pileOffset(s: Sprite): Point {
     const moving = s.path.length > 0 || !!s.next;
-    const k = moving ? 0 : Math.min(s.pileRank, 3);
+    // Only crates parked in a factory pile spot stack up; archived crates (train, warehouse) never do.
+    const k = moving || s.stage ? 0 : Math.min(s.pileRank, 3);
     return { x: s.x - k * 6, y: s.y - k * 6 };
   }
 
@@ -818,8 +823,8 @@ export class Scene {
   private drawTrain(ctx: CanvasRenderingContext2D, t: number): void {
     const a = AREAS.freight;
     const cx = this.train.x;
-    const wagonX = cx - 40;
-    const engines = [cx - 86, cx + 46];
+    const wagonX = cx - TRAIN.wagonW / 2;
+    const engines = [cx - TRAIN.half, cx + TRAIN.half - 40];
     const body = ctx.createLinearGradient(0, TRAIN_Y - 22, 0, TRAIN_Y + 14);
     body.addColorStop(0, '#f6a24a');
     body.addColorStop(1, C.orangeDark);
@@ -827,7 +832,7 @@ export class Scene {
     ctx.shadowColor = 'rgba(0,0,0,0.5)';
     ctx.shadowBlur = 10;
     ctx.shadowOffsetY = 4;
-    fillSquircle(ctx, wagonX, TRAIN_Y - 10, 80, 24, RADIUS.small, '#4a4e55');
+    fillSquircle(ctx, wagonX, TRAIN_Y - 10, TRAIN.wagonW, 24, RADIUS.small, '#4a4e55');
     for (const ex of engines) fillSquircle(ctx, ex, TRAIN_Y - 18, 40, 32, RADIUS.medium, body);
     ctx.restore();
     // Cab windows face outwards; stacks sit towards the wagon.
@@ -835,7 +840,7 @@ export class Scene {
     fillSquircle(ctx, engines[1] + 23, TRAIN_Y - 12, 13, 10, RADIUS.small, '#16181b');
     fillSquircle(ctx, engines[0] + 26, TRAIN_Y - 27, 8, 10, RADIUS.small, '#6b6f76');
     fillSquircle(ctx, engines[1] + 6, TRAIN_Y - 27, 8, 10, RADIUS.small, '#6b6f76');
-    for (const wx of [wagonX + 14, wagonX + 66, engines[0] + 10, engines[0] + 30, engines[1] + 10, engines[1] + 30]) {
+    for (const wx of [wagonX + 16, wagonX + TRAIN.wagonW - 16, engines[0] + 10, engines[0] + 30, engines[1] + 10, engines[1] + 30]) {
       squircleAt(ctx, wx, TRAIN_Y + 15, 11);
       ctx.fillStyle = '#121315';
       ctx.fill();
@@ -863,8 +868,9 @@ export class Scene {
       return;
     }
     const cx = x + CRATE_W / 2;
-    const parked = c.zone === 'storage' && !moving;
-    const buried = !moving && s.pileRank > 0;
+    // Ended sessions look dimmed wherever their crate is: parked, on a belt, on a crane or on the train.
+    const parked = c.zone === 'storage';
+    const buried = !moving && !s.stage && s.pileRank > 0;
 
     const holder = this.heldBy(c.id);
     const lifted = holder ? holder.lift : 0;
@@ -877,7 +883,7 @@ export class Scene {
       ctx.translate(-cx, -(y + CRATE_H / 2));
     }
     ctx.save();
-    ctx.globalAlpha = parked && !lifted ? 0.62 : 1;
+    ctx.globalAlpha = parked ? 0.62 : 1;
     ctx.shadowColor = 'rgba(0,0,0,0.55)';
     ctx.shadowBlur = 8 + 12 * lifted;
     ctx.shadowOffsetY = 4 + 16 * lifted;

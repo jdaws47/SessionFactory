@@ -111,7 +111,7 @@ function contents(area: Area): Rect[] {
         ...belts,
         { x: FREIGHT.rails.left - 4, y: FREIGHT.rails.top - 6, w: FREIGHT.rails.right - FREIGHT.rails.left + 8, h: FREIGHT.rails.bottom - FREIGHT.rails.top + 12 },
         // Wagon with an engine at each end, and the label under the train.
-        { x: FREIGHT.wagon.x - 88, y: TRAIN_Y - 34, w: 176, h: 76 },
+        { x: FREIGHT.wagon.x - 108, y: TRAIN_Y - 34, w: 216, h: 76 },
       ];
   }
 }

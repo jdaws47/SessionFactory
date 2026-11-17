@@ -230,7 +230,10 @@ describe('warehouse layout', () => {
   it('keeps every crate spot inside the building, clear of the train at its stop and of the gantry rails', async () => {
     const { STACKS, SPOTS, TRAIN } = await import('../web/warehouse');
     const p = STACKS.platform;
-    const train = { left: TRAIN.warehouseX - 86, right: TRAIN.warehouseX + 86, top: TRAIN.railY - 34, bottom: TRAIN.railY + 42 };
+    const train = { left: TRAIN.warehouseX - TRAIN.half, right: TRAIN.warehouseX + TRAIN.half, top: TRAIN.railY - 34, bottom: TRAIN.railY + 42 };
+    // The wagon fits a crate between the engines.
+    expect(TRAIN.wagonW).toBeGreaterThanOrEqual(118 + 4);
+    expect(TRAIN.half * 2 - 80).toBeGreaterThanOrEqual(TRAIN.wagonW);
     expect(SPOTS.length).toBeGreaterThanOrEqual(90);
     for (const c of SPOTS) {
       const clearOfTrain = c.x + 59 < train.left || c.x - 59 > train.right || c.y + 28 < train.top || c.y - 28 > train.bottom;

@@ -1,5 +1,5 @@
 import { FREIGHT } from './belts';
-import { CRATE_H, type Point, TRAIN_Y, W } from './layout';
+import { type Point, TRAIN_Y, W } from './layout';
 
 /** The world is two screens wide: the factory, and the warehouse to its right. */
 export const WAREHOUSE_X = W;
@@ -9,7 +9,10 @@ export const WORLD_W = W * 2;
 export const TRAIN = {
   factoryX: FREIGHT.wagon.x,
   /** Pulled well in, clear of the gantry's left rail. */
-  warehouseX: WAREHOUSE_X + 200,
+  warehouseX: WAREHOUSE_X + 215,
+  /** The wagon fits one crate snugly; an engine sits at each end. Half the whole train's length: */
+  half: 108,
+  wagonW: 126,
   /** Where crates ride on the wagon (relative to the train's x). */
   wagonY: FREIGHT.wagon.y,
   railY: TRAIN_Y,
@@ -32,7 +35,7 @@ export const STACKS = {
 };
 
 /** The train (both engines) and its track at the warehouse stop, which crate spots keep clear of. */
-const TRAIN_FOOTPRINT = { x: TRAIN.warehouseX - 96, y: TRAIN.railY - 40, w: 206, h: 84 };
+const TRAIN_FOOTPRINT = { x: TRAIN.warehouseX - TRAIN.half - 6, y: TRAIN.railY - 40, w: TRAIN.half * 2 + 12, h: 84 };
 
 function gridCentre(col: number, row: number): Point {
   const f = STACKS.field;
@@ -133,10 +136,9 @@ export class Train {
     this.idle = 0;
   }
 
-  /** Where the n-th crate sits in the wagon (up to three side by side, the rest stacked on top). */
+  /** Where the n-th crate sits in the wagon: centred on it, later crates stacked a little higher. */
   wagonSpot(n = 0): Point {
-    const slot = Math.min(n, 5);
-    return { x: this.x - 30 + (slot % 3) * 30, y: TRAIN.wagonY - Math.floor(slot / 3) * 10 - CRATE_H * 0 };
+    return { x: this.x, y: TRAIN.wagonY - Math.min(n, 3) * 6 };
   }
 
   update(dt: number): void {
