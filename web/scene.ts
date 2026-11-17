@@ -745,16 +745,17 @@ export class Scene {
     }
   }
 
-  /** Badges on parked crates (pile count, wait time, SHIP?), drawn last so nothing overhead covers them. */
+  /** Crate badges (SHIP? everywhere; pile count and wait time when parked), drawn last so nothing covers them. */
   private drawBadges(ctx: CanvasRenderingContext2D): void {
     for (const [id, s] of this.drawOrder()) {
       const c = this.crates.get(id);
-      if (!c || s.path.length || s.next || s.leaving || s.pileRank > 0 || this.heldBy(id)) continue;
+      const parked = !s.path.length && !s.next && !this.heldBy(id);
+      if (!c || s.leaving || s.loading !== undefined || (parked && s.pileRank > 0)) continue;
       const x = Math.round(s.x - CRATE_W / 2);
       const y = Math.round(s.y - CRATE_H / 2);
       const cx = x + CRATE_W / 2;
       ctx.textAlign = 'center';
-      if (s.pileSize > 1) {
+      if (parked && s.pileSize > 1) {
         const label = `+${s.pileSize - 1}`;
         ctx.font = '800 10px system-ui, sans-serif';
         const w = ctx.measureText(label).width + 10;
@@ -762,11 +763,12 @@ export class Scene {
         ctx.fillStyle = '#111';
         ctx.fillText(label, x - 8 + w / 2, y + 4);
       }
-      if (c.zone === 'dock') {
+      if (parked && c.zone === 'dock') {
         ctx.fillStyle = C.dim;
         ctx.font = '10px system-ui, sans-serif';
         ctx.fillText(`waiting ${minutes(this.now() - c.zoneSince)}`, cx, y - 6);
       }
+      // "Ready to ship" belongs to the session, so it travels with the crate.
       if (c.readyToShip) {
         fillSquircle(ctx, x + CRATE_W - 26, y - 9, 36, 15, RADIUS.small, C.ship);
         ctx.fillStyle = '#052e22';
