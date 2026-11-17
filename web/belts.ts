@@ -270,14 +270,18 @@ export const FREIGHT_LOAD: Point = { x: 150, y: 770 };
 /** Storage yard: belt along the top, crane field below. */
 export const YARD = {
   busY: 572,
+  /** The yard belt's legs sit symmetrically about the platform centre (1365). */
+  inX: 1530,
+  outX: 1200,
   /** One transfer point, the middle of the belt through the yard: crates are picked up and set down here. */
-  pickup: { x: 1360, y: 572 },
-  drop: { x: 1360, y: 572 },
-  columns: [1244, 1370, 1496],
+  pickup: { x: 1365, y: 572 },
+  drop: { x: 1365, y: 572 },
+  columns: [1239, 1365, 1491],
   rows: [656, 734, 812],
-  rails: { left: 1172, right: 1558, top: 552, bottom: 852 },
+  /** Rails stand just outside the belt's legs (belt edges 1185 / 1545) with a small gap. */
+  rails: { left: 1175, right: 1555, top: 552, bottom: 852 },
   /** Where the crane parks between jobs: between the belt and the first row, under the transfer point. */
-  home: { x: 1360, y: 607 },
+  home: { x: 1365, y: 607 },
 };
 
 function craneYard(track: Track): CraneSlot[] {
@@ -291,7 +295,7 @@ export const NET: Record<Area, ZoneNet> = {
   working: zone(topZoneTrack(310, 1530, TOP_BUS), (t) => TOP_ROWS.flatMap((y) => MACHINE_COLUMNS.map((x) => stubSlot(t, TOP_BUS, { x, y })))),
   freight: zone(bottomZoneTrack(230, 60, FREIGHT_LOAD.y), (t) => trackSlots(t, [FREIGHT_LOAD])),
   dock: dockLine(),
-  storage: zone(bottomZoneTrack(1540, 1180, YARD.busY), craneYard),
+  storage: zone(bottomZoneTrack(YARD.inX, YARD.outX, YARD.busY), craneYard),
 };
 
 export const HOPPER_S = 0;

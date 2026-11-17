@@ -372,27 +372,18 @@ export class Scene {
     fillSquircle(ctx, r.left - 8, by - 6, r.right - r.left + 16, 4, 2, C.orange);
     const tx = crane.pos.x;
     const ty = crane.pos.y;
-    // Spreader: four clamps that close onto the crate's corners, hung from the trolley by cables.
-    const scale = 1 + 0.08 * crane.lift;
-    const spreadX = (CRATE_W / 2 + 12 - 10 * crane.grip) * scale;
-    const spreadY = (CRATE_H / 2 + 12 - 10 * crane.grip) * scale;
-    const corners = [[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sy]) => ({ x: tx + sx * spreadX, y: ty + sy * spreadY }));
-    if (crane.busy) {
-      ctx.strokeStyle = 'rgba(200,205,212,0.7)';
-      ctx.lineWidth = 1.5;
-      for (const c of corners) {
-        ctx.beginPath();
-        ctx.moveTo(tx, ty);
-        ctx.lineTo(c.x, c.y);
-        ctx.stroke();
-      }
-      for (const c of corners) {
-        fillSquircle(ctx, c.x - 6, c.y - 6, 12, 12, 3, '#3a3e45');
-        fillSquircle(ctx, c.x - 6, c.y - 6, 12, 3, 1.5, C.orange);
-      }
+    // Magnetic lifter: a plate under the trolley that glows as it engages.
+    const charge = crane.grip;
+    if (charge > 0) {
+      ctx.save();
+      ctx.shadowColor = '#60a5fa';
+      ctx.shadowBlur = 18 * charge;
+      fillSquircle(ctx, tx - 26, ty - 18, 52, 36, RADIUS.medium, `rgba(96,165,250,${0.25 * charge})`);
+      ctx.restore();
     }
-    fillSquircle(ctx, tx - 18, ty - 13, 36, 26, RADIUS.small, '#3a3e45');
-    fillSquircle(ctx, tx - 18, ty - 13, 36, 5, 2, crane.busy ? '#4ade80' : '#57534e');
+    fillSquircle(ctx, tx - 22, ty - 15, 44, 30, RADIUS.medium, '#2a2d33');
+    fillSquircle(ctx, tx - 16, ty - 10, 32, 20, RADIUS.small, charge > 0 ? `rgba(147,197,253,${0.35 + 0.5 * charge})` : '#3f444c');
+    fillSquircle(ctx, tx - 22, ty - 15, 44, 4, 2, crane.busy ? '#4ade80' : '#57534e');
   }
 
   private machineStates(): { pos: Point; index: number; crate?: CrateView }[] {
@@ -544,6 +535,16 @@ export class Scene {
     const top = y + CRATE_H / 2 - (lines.length - 1) * 7 + 4;
     lines.forEach((l, i) => ctx.fillText(l, cx, top + i * 14));
     ctx.restore();
+    if (this.crane.holding === c.id) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(147,197,253,0.6)';
+      ctx.shadowColor = '#60a5fa';
+      ctx.shadowBlur = 10;
+      ctx.lineWidth = 2;
+      squirclePath(ctx, x - 2, y - 2, CRATE_W + 4, CRATE_H + 4, RADIUS.crate + 1);
+      ctx.stroke();
+      ctx.restore();
+    }
     ctx.restore();
 
     if (selected || hover) {
@@ -885,7 +886,7 @@ function plant(g: CanvasRenderingContext2D, x: number, y: number, rnd: () => num
 }
 
 /** Title plates sit clear of the belts that enter each foundation. */
-const TITLE_INSET: Partial<Record<Area, number>> = { dock: 62, storage: 48 };
+const TITLE_INSET: Partial<Record<Area, number>> = { dock: 62, storage: 64 };
 
 function foundation(g: CanvasRenderingContext2D, key: Area, a: (typeof AREAS)[Area]): void {
   g.save();

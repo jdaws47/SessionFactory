@@ -129,3 +129,16 @@ describe('floor placement', () => {
     expect(out[1]).toMatchObject({ x: YARD.drop.x, y: YARD.drop.y, crane: true });
   });
 });
+
+describe('storage yard layout', () => {
+  it('centres the yard belt on the platform and keeps the crane rails clear of it', async () => {
+    const { AREAS } = await import('../web/layout');
+    const centre = AREAS.storage.x + AREAS.storage.w / 2;
+    expect((YARD.inX + YARD.outX) / 2).toBe(centre);
+    const beltHalfWidth = 15;
+    const railHalfWidth = 4;
+    expect(YARD.outX - beltHalfWidth - (YARD.rails.left + railHalfWidth)).toBeGreaterThanOrEqual(4);
+    expect(YARD.rails.right - railHalfWidth - (YARD.inX + beltHalfWidth)).toBeGreaterThanOrEqual(4);
+    expect(YARD.pickup.x).toBe(centre);
+  });
+});
