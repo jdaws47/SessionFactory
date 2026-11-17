@@ -81,6 +81,19 @@ export class Terminals {
     await this.refresh();
   }
 
+  /**
+   * Ends a factory terminal. When Claude is idle at its prompt it is asked to /exit first so the session
+   * ends cleanly; then the tmux session (and the shell left behind) is closed.
+   */
+  async end(slot: string, claudeIdle: boolean): Promise<void> {
+    if (claudeIdle) {
+      await this.tmux(['send-keys', '-t', slot, '-l', '/exit']).catch(() => undefined);
+      await this.tmux(['send-keys', '-t', slot, 'Enter']).catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 2500));
+    }
+    await this.kill(slot);
+  }
+
   async kill(slot: string): Promise<void> {
     await this.tmux(['kill-session', '-t', slot]).catch(() => undefined);
     await this.refresh();

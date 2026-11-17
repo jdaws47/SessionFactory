@@ -76,9 +76,23 @@ async function startNew(opts: { label?: string; jiraKey?: string; prompt?: strin
 
 app.route('GET', '/api/state', () => state());
 
+/** Ends a crate's factory terminal (clean /exit when Claude is idle) and moves the crate to storage. */
+async function endSession(crate: Crate): Promise<void> {
+  if (!crate.slot || !liveTerminal(crate)) return;
+  await terminals.end(crate.slot, crate.zone === 'dock' || crate.zone === 'intake');
+  registry.markEnded(crate.id, Date.now());
+  broadcast();
+}
+
+app.route('POST', '/api/crates/:id/end', async (_b, { id }) => {
+  const crate = crateOr404(id);
+  if (!liveTerminal(crate)) throw new HttpError(409, 'This crate has no factory terminal to end.');
+  await endSession(crate);
+});
+
 app.route('POST', '/api/crates/:id/archive', async (body, { id }) => {
   const crate = crateOr404(id);
-  if (body.endSession && crate.slot && liveTerminal(crate)) await terminals.kill(crate.slot);
+  if (body.endSession) await endSession(crate);
   registry.archive(id, Date.now());
 });
 app.route('POST', '/api/crates/:id/unarchive', (_b, { id }) => {

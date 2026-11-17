@@ -191,6 +191,11 @@ export class Registry {
     });
   }
 
+  /** Records that a session was ended on purpose (its terminal closed from the factory). */
+  markEnded(id: string, now: number): void {
+    this.update(id, (c) => (c.zone === 'storage' ? c : { ...c, zone: 'storage', zoneSince: now, endedAt: now, alertReason: undefined, waitingOn: undefined }));
+  }
+
   /** Moves crates whose Claude process has gone away (crash, closed terminal) into storage. */
   checkLiveness(isAlive: (pid: number) => boolean, now: number): void {
     for (const c of this.all()) {

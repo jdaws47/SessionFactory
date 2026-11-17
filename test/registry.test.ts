@@ -82,6 +82,13 @@ describe('persistence and lifecycle', () => {
     expect(reg.get(id)?.archived).toBe(false);
   });
 
+  it('a session ended from the factory goes to storage even without a known process', () => {
+    reg.ingest(ev({ kind: 'prompt', sessionId: 'a', prompt: 'x' }));
+    const id = reg.all()[0].id;
+    reg.markEnded(id, 9);
+    expect(reg.get(id)).toMatchObject({ zone: 'storage', endedAt: 9, archived: false });
+  });
+
   it('archive and bring back keep counts and history', () => {
     reg.ingest(ev({ kind: 'end', sessionId: 'a' }));
     const id = reg.all()[0].id;

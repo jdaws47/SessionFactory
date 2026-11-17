@@ -30,6 +30,13 @@ export function resumeCommand(c: CrateView, cleanRoot: string): string {
   return `scrub-in; cd '${cleanRoot}' && claude --resume ${lastSessionId(c)}`;
 }
 
+const svg = (d: string) =>
+  `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
+/** Corners pointing out: go full screen. */
+const ICON_EXPAND = svg('M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5');
+/** Corners pointing in: leave full screen. */
+const ICON_COLLAPSE = svg('M9 4v5H4M15 4v5h5M20 15h-5v5M4 15h5v5');
+
 const ZONE_NAMES: Record<string, string> = {
   intake: 'Intake',
   working: 'Working',
@@ -268,6 +275,24 @@ export class Ui {
           { label: 'Cancel', run: closeMenu },
         ]
       : [
+          ...(c.hasTerminal
+            ? [
+                {
+                  label: 'End session',
+                  kind: 'danger' as const,
+                  run: async () => {
+                    const busy = c.zone === 'working' || c.zone === 'alert';
+                    const question = busy
+                      ? `Claude is in the middle of a turn in "${c.label}". End the session anyway? This interrupts it and closes the terminal.`
+                      : `End the session in "${c.label}" and close its terminal? You can resume it later from Storage.`;
+                    if (!window.confirm(question)) return;
+                    this.toast('Ending session…');
+                    await post(`/api/crates/${c.id}/end`);
+                    this.toast(`${c.label} ended`);
+                  },
+                },
+              ]
+            : []),
           { label: 'Copy resume cmd', run: () => this.copy(resumeCommand(c, s.cleanRoot), 'Resume command') },
           {
             label: 'Archive…',
@@ -304,7 +329,7 @@ export class Ui {
       </div>
       <div class="cw-actions">
         ${actions.map((a) => this.button(a)).join('')}
-        <button class="icon" title="${this.fullScreen ? 'Exit full screen' : 'Full screen'}" ${toggleFull}>${this.fullScreen ? '⤡' : '⤢'}</button>
+        <button class="icon svg" title="${this.fullScreen ? 'Exit full screen' : 'Full screen'}" aria-label="${this.fullScreen ? 'Exit full screen' : 'Full screen'}" ${toggleFull}>${this.fullScreen ? ICON_COLLAPSE : ICON_EXPAND}</button>
         <button class="icon" title="Close (the terminal keeps running)" ${this.act(() => this.select(null))}>✕</button>
       </div>`;
   }
