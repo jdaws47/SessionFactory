@@ -174,10 +174,35 @@ describe('freight train and warehouse', () => {
     expect(scene.train.atFactory).toBe(true);
   });
 
+  it('an idle train follows you to whichever page you are looking at', () => {
+    const scene = new Scene();
+    scene.setCrates([], 1000);
+    scene.panTo('warehouse');
+    step(scene, 30, () => scene.train.atWarehouse);
+    expect(scene.train.atWarehouse).toBe(true);
+    scene.panTo('factory');
+    step(scene, 30, () => scene.train.atFactory);
+    expect(scene.train.atFactory).toBe(true);
+  });
+
   it('crates archived before the page loaded are already on the stacks', () => {
     const scene = new Scene();
     scene.setCrates([{ ...crate('old', 'storage', 1), archived: true, archivedAt: 5 }], 1000);
     expect(st(scene, 'old').stage).toBe('yard');
     expect(st(scene, 'old').x).toBeGreaterThan(1600);
+  });
+});
+
+describe('warehouse layout', () => {
+  it('keeps every crate spot inside the building, clear of the train at its stop', async () => {
+    const { STACKS, stackCentre, TRAIN } = await import('../web/warehouse');
+    const p = STACKS.platform;
+    const trainRight = TRAIN.warehouseX + 86;
+    for (let i = 0; i < STACKS.field.cols * STACKS.field.rows; i++) {
+      const c = stackCentre(i);
+      expect(c.x - 59).toBeGreaterThan(trainRight + 10);
+      expect(c.x + 59).toBeLessThan(p.x + p.w);
+      expect(c.y + 28).toBeLessThan(p.y + p.h);
+    }
   });
 });

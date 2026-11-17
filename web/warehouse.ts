@@ -24,7 +24,8 @@ export const STACKS = {
   rails: { left: PLATFORM.x + 24, right: PLATFORM.x + PLATFORM.w - 24, top: PLATFORM.y + 52, bottom: PLATFORM.y + PLATFORM.h - 14 },
   /** Parks top-left, out of the way. */
   home: { x: PLATFORM.x + 70, y: PLATFORM.y + 52 },
-  field: { x: WAREHOUSE_X + 380, y: 112, cols: 8, rows: 10, cw: 136, ch: 74 },
+  /** Starts just past the train stop's far engine; 9 x 10 spots. */
+  field: { x: WAREHOUSE_X + 262, y: 112, cols: 9, rows: 10, cw: 136, ch: 74 },
   levels: 1,
   lift: 0,
 };

@@ -578,6 +578,7 @@ export class Scene {
       if (spot) Object.assign(s, spot);
     }
 
+    const onTheWay = [...this.sprites.values()].some((s) => s.leaving && !s.stage);
     if (train.atFactory) {
       for (const id of train.cargo.filter((cid) => this.sprites.get(cid)?.returning)) {
         // Home: the freight crane lifts it out of the wagon onto the belt, and it heads for its spot.
@@ -588,10 +589,10 @@ export class Scene {
         s.currentTo = s.at;
         train.cargo = train.cargo.filter((cid) => cid !== id);
       }
-      const onTheWay = [...this.sprites.values()].some((s) => s.leaving && !s.stage);
       const wagonBusy = [...this.sprites.entries()].some(([id, s]) => !s.stage && (this.heldBy(id) === this.cranes.freight || Math.hypot(s.x - FREIGHT.wagon.x, s.y - FREIGHT.wagon.y) < 12));
       const fetchWaiting = [...this.sprites.values()].some((s) => s.stage === 'yard' && s.returning);
-      if (!onTheWay && !wagonBusy && train.idle > TRAIN_DWELL && (train.cargo.length || fetchWaiting)) train.goTo('warehouse');
+      const work = train.cargo.length > 0 || fetchWaiting;
+      if (!onTheWay && !wagonBusy && ((work && train.idle > TRAIN_DWELL) || (!work && this.onWarehouse))) train.goTo('warehouse');
     }
 
     if (train.atWarehouse) {
@@ -607,7 +608,12 @@ export class Scene {
         this.gantryJobs.set(id, 'fetch');
         this.gantry.request(id, train.wagonSpot(train.cargo.length + [...this.gantryJobs.values()].filter((j) => j === 'fetch').length - 1));
       }
-      if (!this.gantry.busy && !this.gantryJobs.size && train.idle > TRAIN_DWELL) train.goTo('factory');
+      if (!this.gantry.busy && !this.gantryJobs.size) {
+        // Crates coming home, or archived crates waiting at the freight station, call it back; otherwise an idle
+        // train simply follows you to whichever page you're looking at.
+        const needed = train.cargo.some((id) => this.sprites.get(id)?.returning) || onTheWay;
+        if ((needed && train.idle > TRAIN_DWELL) || (!train.cargo.length && !this.onWarehouse)) train.goTo('factory');
+      }
     }
 
     this.gantry.update(dt, {
