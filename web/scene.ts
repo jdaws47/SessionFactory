@@ -61,6 +61,8 @@ interface Sprite {
 }
 
 const LOAD_SECONDS = 0.8;
+/** Seconds the train waits at each end before moving, so more crates can gather for each trip. */
+const TRAIN_DWELL = 10;
 const PATIENCE = 2.5;
 const LOAD_DROP = 6;
 
@@ -589,7 +591,7 @@ export class Scene {
       const onTheWay = [...this.sprites.values()].some((s) => s.leaving && !s.stage);
       const wagonBusy = [...this.sprites.entries()].some(([id, s]) => !s.stage && (this.heldBy(id) === this.cranes.freight || Math.hypot(s.x - FREIGHT.wagon.x, s.y - FREIGHT.wagon.y) < 12));
       const fetchWaiting = [...this.sprites.values()].some((s) => s.stage === 'yard' && s.returning);
-      if (!onTheWay && !wagonBusy && train.idle > 1.2 && (train.cargo.length || fetchWaiting)) train.goTo('warehouse');
+      if (!onTheWay && !wagonBusy && train.idle > TRAIN_DWELL && (train.cargo.length || fetchWaiting)) train.goTo('warehouse');
     }
 
     if (train.atWarehouse) {
@@ -605,7 +607,7 @@ export class Scene {
         this.gantryJobs.set(id, 'fetch');
         this.gantry.request(id, train.wagonSpot(train.cargo.length + [...this.gantryJobs.values()].filter((j) => j === 'fetch').length - 1));
       }
-      if (!this.gantry.busy && !this.gantryJobs.size && train.idle > 0.8) train.goTo('factory');
+      if (!this.gantry.busy && !this.gantryJobs.size && train.idle > TRAIN_DWELL) train.goTo('factory');
     }
 
     this.gantry.update(dt, {
@@ -702,9 +704,7 @@ export class Scene {
     const a = AREAS.working;
     ctx.font = '800 13px system-ui, sans-serif';
     const titleW = ctx.measureText(a.title).width;
-    ctx.font = '12px system-ui, sans-serif';
-    const subW = ctx.measureText(a.subtitle).width;
-    const left = a.x + 16 + titleW + 30 + subW + 14;
+    const left = a.x + 16 + titleW + 30;
     const label = `${jammed} jammed · need${jammed === 1 ? 's' : ''} you`;
     ctx.font = '800 11px system-ui, sans-serif';
     const w = ctx.measureText(label).width + 16;
@@ -774,31 +774,36 @@ export class Scene {
     }
   }
 
+  /** The freight train: one wagon with an engine at each end, since it shuttles both ways. */
   private drawTrain(ctx: CanvasRenderingContext2D, t: number): void {
     const a = AREAS.freight;
-    const wagonX = this.train.x - 46;
-    const locoX = wagonX + 100;
+    const cx = this.train.x;
+    const wagonX = cx - 40;
+    const engines = [cx - 86, cx + 46];
+    const body = ctx.createLinearGradient(0, TRAIN_Y - 22, 0, TRAIN_Y + 14);
+    body.addColorStop(0, '#f6a24a');
+    body.addColorStop(1, C.orangeDark);
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.5)';
     ctx.shadowBlur = 10;
     ctx.shadowOffsetY = 4;
-    fillSquircle(ctx, wagonX, TRAIN_Y - 10, 92, 24, RADIUS.small, '#4a4e55');
-    const loco = ctx.createLinearGradient(0, TRAIN_Y - 22, 0, TRAIN_Y + 14);
-    loco.addColorStop(0, '#f6a24a');
-    loco.addColorStop(1, C.orangeDark);
-    fillSquircle(ctx, locoX, TRAIN_Y - 18, 52, 32, RADIUS.medium, loco);
+    fillSquircle(ctx, wagonX, TRAIN_Y - 10, 80, 24, RADIUS.small, '#4a4e55');
+    for (const ex of engines) fillSquircle(ctx, ex, TRAIN_Y - 18, 40, 32, RADIUS.medium, body);
     ctx.restore();
-    fillSquircle(ctx, locoX + 30, TRAIN_Y - 12, 16, 10, RADIUS.small, '#16181b');
-    fillSquircle(ctx, locoX + 8, TRAIN_Y - 28, 9, 11, RADIUS.small, '#6b6f76');
-    for (let i = 0; i < Math.min(this.archivedCount, 6); i++) {
-      fillSquircle(ctx, wagonX + 4 + (i % 3) * 29, TRAIN_Y - 24 - Math.floor(i / 3) * 14, 26, 13, RADIUS.small, i % 2 ? '#8a6f52' : '#7a614a');
-    }
-    for (const wx of [wagonX + 14, wagonX + 78, locoX + 12, locoX + 40]) {
-      squircleAt(ctx, wx, TRAIN_Y + 15, 12);
+    // Cab windows face outwards; stacks sit towards the wagon.
+    fillSquircle(ctx, engines[0] + 4, TRAIN_Y - 12, 13, 10, RADIUS.small, '#16181b');
+    fillSquircle(ctx, engines[1] + 23, TRAIN_Y - 12, 13, 10, RADIUS.small, '#16181b');
+    fillSquircle(ctx, engines[0] + 26, TRAIN_Y - 27, 8, 10, RADIUS.small, '#6b6f76');
+    fillSquircle(ctx, engines[1] + 6, TRAIN_Y - 27, 8, 10, RADIUS.small, '#6b6f76');
+    for (const wx of [wagonX + 14, wagonX + 66, engines[0] + 10, engines[0] + 30, engines[1] + 10, engines[1] + 30]) {
+      squircleAt(ctx, wx, TRAIN_Y + 15, 11);
       ctx.fillStyle = '#121315';
       ctx.fill();
     }
-    smoke(ctx, locoX + 12, TRAIN_Y - 32, t, 0);
+    if (this.train.moving) {
+      smoke(ctx, engines[0] + 30, TRAIN_Y - 31, t, 0);
+      smoke(ctx, engines[1] + 10, TRAIN_Y - 31, t, 1);
+    }
     ctx.fillStyle = C.dim;
     ctx.font = '600 11px system-ui, sans-serif';
     ctx.textAlign = 'center';
@@ -1262,7 +1267,7 @@ function paintWarehouse(g: CanvasRenderingContext2D): void {
     g.fillRect(WAREHOUSE_X + rnd() * W, rnd() * H, 2, 2);
   }
   const p = STACKS.platform;
-  foundation(g, 'warehouse', { ...p, title: 'WAREHOUSE', subtitle: 'archived sessions' });
+  foundation(g, 'warehouse', { ...p, title: 'WAREHOUSE', subtitle: '' });
   paintRail(g);
 }
 
@@ -1355,7 +1360,7 @@ function foundation(g: CanvasRenderingContext2D, key: Area | 'warehouse', a: (ty
   g.fillStyle = '#1a1208';
   g.textAlign = 'left';
   g.fillText(a.title, left + 10, a.y + 29);
-  if (a.w > 300) {
+  if (a.w > 300 && a.subtitle) {
     g.fillStyle = C.dim;
     g.font = '12px system-ui, sans-serif';
     g.fillText(a.subtitle, left + tw + 30, a.y + 29);

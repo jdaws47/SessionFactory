@@ -136,6 +136,7 @@ export class Ui {
     this.onWarehousePage = true;
     this.onPan?.('warehouse');
     this.renderWarehouseBar();
+    this.renderTop();
   }
 
   /** Pans back to the factory floor. */
@@ -144,6 +145,7 @@ export class Ui {
     this.stackPanel.hidden = true;
     this.onPan?.('factory');
     this.renderWarehouseBar();
+    this.renderTop();
   }
 
   /** The shelf list of everything archived (search, sort, actions). */

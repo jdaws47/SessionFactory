@@ -54,6 +54,27 @@ describe('storage crane', () => {
     expect(crane.busy).toBe(false);
   });
 
+  it('moves the bridge first when empty, and the trolley first when carrying', () => {
+    const w = world({ x: 100, y: 300 });
+    const crane = new Crane(HOME);
+    crane.request('c', { x: 400, y: 100 });
+    const moves: string[] = [];
+    let prev = { ...crane.pos };
+    let carrying = false;
+    run(crane, w.api, 40, () => {
+      const axis = crane.pos.x !== prev.x ? 'x' : crane.pos.y !== prev.y ? 'y' : '';
+      if (axis) {
+        const tag = `${crane.holding ? 'loaded' : 'empty'}:${axis}`;
+        if (moves[moves.length - 1] !== tag) moves.push(tag);
+      }
+      if (crane.holding) carrying = true;
+      prev = { ...crane.pos };
+    });
+    expect(carrying).toBe(true);
+    expect(moves.slice(0, 2)).toEqual(['empty:y', 'empty:x']);
+    expect(moves.slice(2, 4)).toEqual(['loaded:x', 'loaded:y']);
+  });
+
   it('lifts the crate while carrying it and sets it down before letting go', () => {
     const w = world({ x: 100, y: 0 });
     const crane = new Crane(HOME);

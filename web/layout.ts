@@ -52,11 +52,11 @@ export function inRect(p: Point, r: Rect): boolean {
 }
 
 const TITLES: Record<Area, { title: string; subtitle: string }> = {
-  intake: { title: 'INTAKE', subtitle: 'new' },
-  working: { title: 'ASSEMBLY HALL', subtitle: 'claude is working' },
-  freight: { title: 'FREIGHT', subtitle: 'archive' },
-  dock: { title: 'LOADING DOCK', subtitle: 'waiting on you' },
-  storage: { title: 'STORAGE', subtitle: 'session ended' },
+  intake: { title: 'INTAKE', subtitle: '' },
+  working: { title: 'ASSEMBLY HALL', subtitle: '' },
+  freight: { title: 'FREIGHT', subtitle: '' },
+  dock: { title: 'LOADING DOCK', subtitle: '' },
+  storage: { title: 'STORAGE', subtitle: '' },
 };
 
 const PAD = 14;
@@ -110,8 +110,8 @@ function contents(area: Area): Rect[] {
       return [
         ...belts,
         { x: FREIGHT.rails.left - 4, y: FREIGHT.rails.top - 6, w: FREIGHT.rails.right - FREIGHT.rails.left + 8, h: FREIGHT.rails.bottom - FREIGHT.rails.top + 12 },
-        // Wagon and locomotive, and the label under the train.
-        { x: FREIGHT.wagon.x - 46, y: TRAIN_Y - 34, w: 152, h: 76 },
+        // Wagon with an engine at each end, and the label under the train.
+        { x: FREIGHT.wagon.x - 88, y: TRAIN_Y - 34, w: 176, h: 76 },
       ];
   }
 }

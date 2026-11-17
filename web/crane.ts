@@ -162,9 +162,13 @@ export class Crane {
     this.headFor(this.home, 'return');
   }
 
+  /**
+   * Empty, the bridge (y) moves first and the trolley (x) second; loaded, the trolley moves first and the bridge
+   * last, so a hanging load isn't swung along with the heavy bridge until it is lined up.
+   */
   private headFor(target: Point, phase: Phase): void {
     this.target = { x: target.x, y: target.y };
-    this.axis = 'y';
+    this.axis = phase === 'carry' ? 'x' : 'y';
     this.phase = phase;
   }
 
@@ -184,9 +188,10 @@ export class Crane {
       return false;
     }
     this.pos = { ...this.pos, [key]: this.target[key] };
-    if (key === 'y') {
-      this.axis = 'x';
-      if (this.target.x !== this.pos.x) this.timer = this.pause;
+    const other = key === 'y' ? 'x' : 'y';
+    if (this.pos[other] !== this.target[other]) {
+      this.axis = other;
+      this.timer = this.pause;
       return false;
     }
     return true;

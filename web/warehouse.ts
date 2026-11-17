@@ -16,15 +16,17 @@ export const TRAIN = {
   accel: 140,
 };
 
-/** Warehouse floor: a gantry crane over a field of crate stacks. */
+/** Warehouse floor: a gantry crane over a field of crate spots (one crate per spot). */
+const PLATFORM = { x: WAREHOUSE_X + 60, y: 40, w: W - 100, h: 830 };
 export const STACKS = {
-  platform: { x: WAREHOUSE_X + 60, y: 40, w: W - 100, h: 830 },
-  rails: { left: WAREHOUSE_X + 150, right: WAREHOUSE_X + W - 70, top: 90, bottom: 850 },
-  home: { x: WAREHOUSE_X + 260, y: 600 },
-  field: { x: WAREHOUSE_X + 400, y: 110, cols: 8, rows: 8, cw: 136, ch: 90 },
-  levels: 3,
-  /** How far up each crate in a stack is drawn. */
-  lift: 11,
+  platform: PLATFORM,
+  /** Rails run the full platform so the gantry reaches every spot (and the train). */
+  rails: { left: PLATFORM.x + 24, right: PLATFORM.x + PLATFORM.w - 24, top: PLATFORM.y + 52, bottom: PLATFORM.y + PLATFORM.h - 14 },
+  /** Parks top-left, out of the way. */
+  home: { x: PLATFORM.x + 70, y: PLATFORM.y + 52 },
+  field: { x: WAREHOUSE_X + 380, y: 112, cols: 8, rows: 10, cw: 136, ch: 74 },
+  levels: 1,
+  lift: 0,
 };
 
 export function stackCentre(index: number): Point {
