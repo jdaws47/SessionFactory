@@ -11,6 +11,8 @@ export interface PastSession {
   jiraKey?: string;
   startedAt: number;
   endedAt: number;
+  /** A headless run (claude -p, e.g. scrub-in's /init): never shown in the factory or warehouse. */
+  headless?: true;
 }
 
 /** Reads one transcript (.jsonl) line by line and keeps only session metadata. */
@@ -20,6 +22,7 @@ export async function readSession(file: string, jiraProjects: string[]): Promise
   let title: string | undefined;
   let startedAt = Infinity;
   let endedAt = 0;
+  let headless = false;
 
   const lines = readline.createInterface({ input: fs.createReadStream(file, 'utf8'), crlfDelay: Infinity });
   for await (const line of lines) {
@@ -33,6 +36,7 @@ export async function readSession(file: string, jiraProjects: string[]): Promise
     if (typeof r.sessionId === 'string') sessionId = r.sessionId;
     if (r.type === 'custom-title' && typeof r.customTitle === 'string') title = r.customTitle;
     if (!cwd && typeof r.cwd === 'string') cwd = r.cwd;
+    if (r.entrypoint === 'sdk-cli') headless = true;
     if (typeof r.timestamp === 'string') {
       const t = Date.parse(r.timestamp);
       if (Number.isFinite(t)) {
@@ -42,7 +46,7 @@ export async function readSession(file: string, jiraProjects: string[]): Promise
     }
   }
   if (!cwd || !Number.isFinite(startedAt)) return null;
-  return { sessionId, cwd, title, jiraKey: findJiraKey(title, jiraProjects), startedAt, endedAt };
+  return { sessionId, cwd, title, jiraKey: findJiraKey(title, jiraProjects), startedAt, endedAt, ...(headless ? { headless: true as const } : {}) };
 }
 
 /** Past sessions run inside clean-room, from the transcripts in ~/.claude/projects (top-level files only). */

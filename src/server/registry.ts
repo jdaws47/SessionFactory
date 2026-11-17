@@ -86,10 +86,11 @@ export class Registry {
    * will report those). Returns how many were added.
    */
   importPast(sessions: PastSession[], quietSince: number): number {
+    const removed = this.forgetHeadless(new Set(sessions.filter((p) => p.headless).map((p) => p.sessionId)));
     const known = new Set(this.all().flatMap((c) => c.sessionIds));
     let added = 0;
     for (const p of sessions) {
-      if (known.has(p.sessionId) || !isWithin(p.cwd, this.cleanRoot) || p.endedAt > quietSince) continue;
+      if (p.headless || known.has(p.sessionId) || !isWithin(p.cwd, this.cleanRoot) || p.endedAt > quietSince) continue;
       const crate: Crate = {
         ...newCrate({ at: p.startedAt, sessionId: p.sessionId, cwd: p.cwd, kind: 'start' }, this.cleanRoot, randomUUID()),
         sessionIds: [p.sessionId],
@@ -109,11 +110,26 @@ export class Registry {
       known.add(p.sessionId);
       added++;
     }
-    if (added) {
+    if (added || removed) {
       this.scheduleSave();
       for (const l of this.listeners) l();
     }
     return added;
+  }
+
+  /**
+   * Drops crates that only ever held headless runs (claude -p). They were never sessions you worked in, so this is
+   * the one removal that isn't an Archive. Crates that also held a real session are kept.
+   */
+  private forgetHeadless(headless: Set<string>): number {
+    let removed = 0;
+    for (const [id, c] of this.crates) {
+      if (c.sessionIds.length && c.sessionIds.every((s) => headless.has(s))) {
+        this.crates.delete(id);
+        removed++;
+      }
+    }
+    return removed;
   }
 
   /** Points an existing crate at a new factory terminal (resume / bring back). */

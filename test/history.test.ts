@@ -49,6 +49,11 @@ describe('reading past sessions', () => {
     expect((await readSession(file, PROJECTS_LIST))?.jiraKey).toBeUndefined();
   });
 
+  it('marks headless runs (claude -p)', async () => {
+    const file = transcript('h', [{ type: 'user', sessionId: 'h', entrypoint: 'sdk-cli', cwd: CLEAN_ROOT, timestamp: '2026-11-01T10:00:00Z' }]);
+    expect((await readSession(file, PROJECTS_LIST))?.headless).toBe(true);
+  });
+
   it('only returns sessions that ran inside clean-room', async () => {
     transcript('in', [{ type: 'user', cwd: CLEAN_ROOT, timestamp: '2026-11-01T10:00:00Z', message: { content: 'hi' } }]);
     transcript('out', [{ type: 'user', cwd: '/somewhere/else', timestamp: '2026-11-01T10:00:00Z', message: { content: 'hi' } }]);
@@ -74,6 +79,23 @@ describe('importing into the warehouse', () => {
     const imported = reg.all().find((c) => c.sessionIds.includes('old'))!;
     expect(imported).toMatchObject({ archived: true, zone: 'storage', label: 'flaky-qa-tests' });
     expect(reg.importPast([{ ...base, sessionId: 'old' }], 1_000)).toBe(0);
+    reg.close();
+  });
+
+  it('never imports headless runs, and drops crates that only ever held one', () => {
+    const reg = new Registry(path.join(TMP, 'registry.json'), CLEAN_ROOT);
+    reg.ingest({ at: 1, sessionId: 'init', cwd: CLEAN_ROOT, kind: 'start' });
+    reg.ingest({ at: 1, sessionId: 'real', cwd: CLEAN_ROOT, kind: 'start' });
+    const base = { cwd: CLEAN_ROOT, startedAt: 100, endedAt: 200 };
+    const added = reg.importPast(
+      [
+        { ...base, sessionId: 'init', headless: true },
+        { ...base, sessionId: 'other-init', headless: true },
+      ],
+      1_000,
+    );
+    expect(added).toBe(0);
+    expect(reg.all().flatMap((c) => c.sessionIds)).toEqual(['real']);
     reg.close();
   });
 });

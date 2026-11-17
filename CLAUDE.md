@@ -86,7 +86,7 @@ npx vitest run test/machine.test.ts
 ## Engineering Principles
 
 - **Everything stays inside clean-room, except reading `~/.claude`.** `~/.claude` may be read when needed (e.g. `history.ts` imports metadata of past sessions) but never written. Nothing else outside `clean-room/` is read or written (`~/.bash_aliases` included). Imports keep metadata only, never conversation text.
-- **Only Archive takes a crate off the floor.** Process exit, timeouts and Jira status only move a crate to Storage or add a "ready to ship" hint. Nothing deletes crates.
+- **Only Archive takes a crate off the floor.** Process exit, timeouts and Jira status only move a crate to Storage or add a "ready to ship" hint. Nothing deletes crates, except crates that only ever held headless `claude -p` runs (scrub-in's `/init`), which the history import drops.
 - **The hooks are observe-only.** `emit-event` must never print, never exit non-zero, and never make a decision.
 - **Never touch other Claude config.** The only allowed config change is the `hooks` key in `clean-room/.claude/settings.local.json`; any other change must be flagged to the user first.
 - **Jira is read-only.** Only `search` through the vida-jira CLI; no transitions, comments or edits.
