@@ -102,12 +102,15 @@ describe('belt network', () => {
     for (const slot of NET.dock.slots) expect(Math.abs(slot.pos.x - merge.x)).toBeGreaterThanOrEqual(CRATE_W);
   });
 
-  it('the dock recycle belt climbs back up far enough from the in-leg that crates on them cannot touch', async () => {
-    const { CRATE_W } = await import('../web/layout');
-    const { DOCK_IN_X } = await import('../web/belts');
+  it('the dock recycle belt meets the in-leg head-on at its corner, never running alongside it', async () => {
+    const { DOCK_IN_X, DOCK_Y } = await import('../web/belts');
     const recycle = NET.dock.recycle!.track;
-    const upLegX = Math.max(...recycle.pts.filter((p) => p.y > 640 && p.y < 740).map((p) => p.x));
-    expect(DOCK_IN_X - upLegX).toBeGreaterThanOrEqual(CRATE_W + 4);
+    const nearInLeg = recycle.pts.filter((p) => Math.abs(p.x - DOCK_IN_X) < 118);
+    expect(nearInLeg.every((p) => p.y >= DOCK_Y - 25)).toBe(true);
+  });
+
+  it('the loading dock has at least five spots', () => {
+    expect(NET.dock.slots.length).toBeGreaterThanOrEqual(5);
   });
 
   it('crates going opposite ways on the main loop never overlap', async () => {
@@ -171,6 +174,13 @@ describe('platforms', () => {
     const bottom = [AREAS.freight, AREAS.dock, AREAS.storage].map((a) => Math.round(a.y));
     expect(new Set(top).size).toBe(1);
     expect(new Set(bottom).size).toBe(1);
+  });
+
+  it('leave equal gaps either side of the loading dock', async () => {
+    const { AREAS } = await import('../web/layout');
+    const left = AREAS.dock.x - (AREAS.freight.x + AREAS.freight.w);
+    const right = AREAS.storage.x - (AREAS.dock.x + AREAS.dock.w);
+    expect(Math.abs(left - right)).toBeLessThanOrEqual(2);
   });
 
   it('do not overlap each other', async () => {

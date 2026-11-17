@@ -257,11 +257,11 @@ const TOP_ROWS = [148, 292];
 export const MACHINE_COLUMNS = [450, 675, 900, 1125, 1350];
 
 export const HOPPER_DROP: Point = { x: 145, y: 220 };
-export const DOCK_FRONT_X = 460;
+export const DOCK_FRONT_X = 491;
 export const DOCK_Y = 585;
 export const RECYCLE_Y = 715;
-export const DOCK_IN_X = 1120;
-export const DOCK_OUT_X = 350;
+export const DOCK_IN_X = 1151;
+export const DOCK_OUT_X = 381;
 /** Crate width plus a small gap. */
 const DOCK_SPACING = 128;
 
@@ -272,18 +272,18 @@ const DOCK_SPACING = 128;
  * The queue is an accumulation conveyor (one section per spot).
  */
 function dockLine(): ZoneNet {
-  const z = zone(bottomZoneTrack(DOCK_IN_X, DOCK_OUT_X, DOCK_Y), (t) => trackSlots(t, [0, 1, 2, 3].map((i) => ({ x: DOCK_FRONT_X + i * DOCK_SPACING, y: DOCK_Y }))));
+  const z = zone(bottomZoneTrack(DOCK_IN_X, DOCK_OUT_X, DOCK_Y), (t) => trackSlots(t, [0, 1, 2, 3, 4].map((i) => ({ x: DOCK_FRONT_X + i * DOCK_SPACING, y: DOCK_Y }))));
   const spots = z.slots.map((q) => (q.kind === 'track' ? q.s : 0)).sort((a, b) => a - b);
   z.track.splits = spots.slice(1).map((v, i) => (v + spots[i]) / 2);
   const downX = DOCK_OUT_X + 28;
-  // The recycle belt climbs back up a full crate-width (plus a gap) away from the in-leg, so crates on the two
-  // side-by-side belts never overlap.
-  const upX = DOCK_IN_X - 124;
+  // The recycle belt climbs back up to the in-leg's corner from below, so the two legs meet head-on at one
+  // merger instead of running side by side, and the merge sits right at the back of the queue.
+  const upX = DOCK_IN_X;
   const diverge = { x: downX + R, y: DOCK_Y };
   const merge = { x: upX - R, y: DOCK_Y };
   const track = new Track(rounded([diverge, { x: downX, y: DOCK_Y }, { x: downX, y: RECYCLE_Y }, { x: upX, y: RECYCLE_Y }, { x: upX, y: DOCK_Y }, merge], R));
   z.recycle = { track, divergeS: z.track.project(diverge), mergeS: z.track.project(merge) };
-  z.junctions = [...z.junctions, { x: downX, y: DOCK_Y }, { x: upX, y: DOCK_Y }];
+  z.junctions = [...z.junctions, { x: downX, y: DOCK_Y }];
   return z;
 }
 
