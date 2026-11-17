@@ -205,6 +205,31 @@ describe('piles', () => {
   type Internals = { sprites: Map<string, { at: { slot: number }; pileRank: number }>; drawOrder(): [string, unknown][]; pileOffset(s: unknown): { x: number; y: number } };
   const internals = (scene: Scene) => scene as unknown as Internals;
 
+  it('stack in the order crates are physically placed there, not by session timestamps', () => {
+    const scene = new Scene();
+    const cap = NET.storage.slots.length;
+    const full = Array.from({ length: cap }, (_, i) => crate(`s${i}`, 'storage', i));
+    const first = crate('first', 'dock', 1);
+    const last = crate('last', 'dock', 1);
+    scene.setCrates([...full, first, last], 1000);
+    const { sprites } = internals(scene);
+    const resting = () => [...sprites.values()].every((s) => (s as unknown as { settled?: number }).settled !== undefined);
+    // "first" is placed on the pile first, even though its session's timestamp is the newer one.
+    scene.setCrates([...full, { ...first, zone: 'storage', zoneSince: 60 }, last], 2000);
+    step(scene, 120, resting);
+    scene.setCrates([...full, { ...first, zone: 'storage', zoneSince: 60 }, { ...last, zone: 'storage', zoneSince: 10 }], 3000);
+    step(scene, 120, resting);
+    expect(sprites.get('last')!.pileRank).toBe(0);
+    const inFront = () => {
+      const order = internals(scene).drawOrder().map(([id]) => id);
+      return order.indexOf('last') > order.indexOf('first');
+    };
+    expect(inFront()).toBe(true);
+    // Crates set down by different routes can rest a hair apart; the one placed last still goes in front.
+    (sprites.get('first') as unknown as Sprite).y += 0.01;
+    expect(inFront()).toBe(true);
+  });
+
   it('are last in, first out: the newest crate is on top, drawn last, and the first to leave the pile', () => {
     const scene = new Scene();
     const cap = NET.storage.slots.length;

@@ -59,6 +59,10 @@ interface Sprite {
   wagonSlot?: number;
   pileRank: number;
   pileSize: number;
+  /** Order in which it came to rest where it is (undefined while moving): piles stack by it, last in on top. */
+  settled?: number;
+  /** Height in its pile as drawn (levels), easing towards its place so a crate is lifted onto the pile, not teleported. */
+  lift?: number;
   /** Seconds spent waiting for the way to clear; past PATIENCE the crate eases through rather than gridlock. */
   waited?: number;
 }
@@ -228,8 +232,10 @@ export class Scene {
       const piles = new Map<number, CrateView[]>();
       for (const c of list) piles.set(assigned.get(c.id)!, [...(piles.get(assigned.get(c.id)!) ?? []), c]);
       for (const [slot, pile] of piles) {
-        pile.sort((a, b) => b.zoneSince - a.zoneSince);
+        pile.sort((a, b) => this.stackingOrder(b) - this.stackingOrder(a) || b.zoneSince - a.zoneSince);
         pile.forEach((c, rank) => this.place(c, { zone, slot }, first, rank, pile.length, loopers.has(c.id)));
+        // On the first layout everything is already in place: the pile's arrival order is its stacking order.
+        if (first) for (const c of [...pile].reverse()) this.sprites.get(c.id)!.settled = ++this.arrivals;
       }
     }
 
@@ -260,6 +266,8 @@ export class Scene {
   onFollowTrain?: (where: 'factory' | 'warehouse') => void;
   /** A recalled crate's train has left the warehouse while you watched; follow it once it crosses the page edge. */
   private followHome = false;
+  /** Counts crates coming to rest, to order piles by arrival. */
+  private arrivals = 0;
 
   panTo(where: 'factory' | 'warehouse'): void {
     this.camTarget = where === 'factory' ? 0 : WAREHOUSE_X;
@@ -356,6 +364,19 @@ export class Scene {
   }
 
   /** Sends a sprite to a slot along the belts, after finishing the trip it is already on. */
+  /** Where a crate goes in its pile: crates at rest by when they arrived, anything still on its way on top. */
+  private stackingOrder(c: CrateView): number {
+    const s = this.sprites.get(c.id);
+    return !s || s.path.length || s.next || this.heldBy(c.id) ? Infinity : (s.settled ?? Infinity);
+  }
+
+  /** Re-stacks the pile at a spot after a crate comes to rest in it, so the newest arrival is on top. */
+  private restack(at: SlotRef): void {
+    const pile = [...this.sprites.values()].filter((s) => !s.leaving && !s.stage && s.at.zone === at.zone && s.at.slot === at.slot);
+    pile.sort((a, b) => (b.settled ?? Infinity) - (a.settled ?? Infinity));
+    pile.forEach((s, rank) => Object.assign(s, { pileRank: rank, pileSize: pile.length }));
+  }
+
   /**
    * When a crate's remaining route rides the main loop past the turn-off for `to` before leaving the loop, the
    * route cut short at that turn-off. Undefined when the turn-off isn't ahead on this stretch of loop.
@@ -552,6 +573,15 @@ export class Scene {
           budget = 0;
         }
       }
+      const level = this.pileLevel(s);
+      const lift = s.lift ?? level;
+      s.lift = Math.abs(level - lift) <= dt * 8 ? level : lift + Math.sign(level - lift) * dt * 8;
+      const resting = !s.path.length && !s.next && !this.heldBy(id);
+      if (!resting) s.settled = undefined;
+      else if (s.settled === undefined) {
+        s.settled = ++this.arrivals;
+        if (!s.leaving && !s.stage) this.restack(s.at);
+      }
       if (s.leaving && !s.stage && !s.path.length && !s.next && !this.heldBy(id) && this.train.atFactory) {
         // Lowered into the wagon: it is cargo now (and no longer part of any factory pile).
         s.stage = 'cargo';
@@ -734,18 +764,26 @@ export class Scene {
     // Warehouse stacks draw bottom crate first, so higher crates sit on top of lower ones.
     const key = ([id, s]: [string, Sprite]) => {
       const w = s.stage === 'yard' && !this.heldBy(id) ? this.stacks.where(id) : undefined;
-      return w ? stackSpot(w.index, 0).y + w.level * 0.01 : s.y;
+      if (w) return stackSpot(w.index, 0).y + w.level * 0.01;
+      // Crates resting in a factory pile share its spot's depth, so the pile's own order (last placed in front) decides.
+      const resting = !s.stage && !s.leaving && !s.path.length && !s.next && !this.heldBy(id);
+      return resting ? NET[s.at.zone].slots[s.at.slot].pos.y : s.y;
     };
     // Crates on a crane are in the air: they always draw above the crates they pass over.
     const lifted = ([id]: [string, Sprite]) => (this.heldBy(id) ? 1 : 0);
     return [...this.sprites.entries()].sort((a, b) => lifted(a) - lifted(b) || key(a) - key(b) || b[1].pileRank - a[1].pileRank);
   }
 
-  private pileOffset(s: Sprite): Point {
+  /** How high in its pile a crate should sit, in levels (0 = on the floor). */
+  private pileLevel(s: Sprite): number {
     const moving = s.path.length > 0 || !!s.next;
     // Only crates parked in a factory pile spot stack up; archived crates (train, warehouse) never do.
-    // Rank 0 is the newest crate, on top: the pile rises from the oldest (shown up to 4 high).
-    const k = moving || s.stage ? 0 : Math.max(0, Math.min(s.pileSize - 1, 3) - s.pileRank);
+    // Rank 0 is the crate placed last, on top: the pile rises from the first one placed (shown up to 4 high).
+    return moving || s.stage ? 0 : Math.max(0, Math.min(s.pileSize - 1, 3) - s.pileRank);
+  }
+
+  private pileOffset(s: Sprite): Point {
+    const k = s.lift ?? this.pileLevel(s);
     return { x: s.x - k * 6, y: s.y - k * 6 };
   }
 
