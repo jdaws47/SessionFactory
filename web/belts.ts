@@ -262,6 +262,8 @@ export const DOCK_Y = 630;
 export const RECYCLE_Y = 760;
 export const DOCK_IN_X = 1120;
 export const DOCK_OUT_X = 350;
+/** Crate width plus a small gap. */
+const DOCK_SPACING = 128;
 
 /**
  * The loading dock: in-leg down from the loop, a queue running left past the operator, out-leg back up.
@@ -270,11 +272,13 @@ export const DOCK_OUT_X = 350;
  * The queue is an accumulation conveyor (one section per spot).
  */
 function dockLine(): ZoneNet {
-  const z = zone(bottomZoneTrack(DOCK_IN_X, DOCK_OUT_X, DOCK_Y), (t) => trackSlots(t, [0, 1, 2, 3, 4].map((i) => ({ x: DOCK_FRONT_X + i * 134, y: DOCK_Y }))));
+  const z = zone(bottomZoneTrack(DOCK_IN_X, DOCK_OUT_X, DOCK_Y), (t) => trackSlots(t, [0, 1, 2, 3].map((i) => ({ x: DOCK_FRONT_X + i * DOCK_SPACING, y: DOCK_Y }))));
   const spots = z.slots.map((q) => (q.kind === 'track' ? q.s : 0)).sort((a, b) => a - b);
   z.track.splits = spots.slice(1).map((v, i) => (v + spots[i]) / 2);
   const downX = DOCK_OUT_X + 28;
-  const upX = DOCK_IN_X - 40;
+  // The recycle belt climbs back up a full crate-width (plus a gap) away from the in-leg, so crates on the two
+  // side-by-side belts never overlap.
+  const upX = DOCK_IN_X - 124;
   const diverge = { x: downX + R, y: DOCK_Y };
   const merge = { x: upX - R, y: DOCK_Y };
   const track = new Track(rounded([diverge, { x: downX, y: DOCK_Y }, { x: downX, y: RECYCLE_Y }, { x: upX, y: RECYCLE_Y }, { x: upX, y: DOCK_Y }, merge], R));
@@ -401,6 +405,12 @@ export function travel(from: SlotRef, to: SlotRef, lap = false): Waypoint[] {
     return [...on(main, main.between(a.s, recycle.divergeS)), ...on(recycle.track, recycle.track.pts), ...on(main, main.between(recycle.mergeS, b.s)), b.pos];
   }
   return [...leave(from.zone, from.slot), ...on(LOOP, LOOP.between(NET[from.zone].exitLoopS, NET[to.zone].entryLoopS)), ...arrive(to.zone, to.slot)];
+}
+
+/** Route that carries on along a zone's belt from distance s, out onto the loop, and on to a slot. */
+export function onwardFrom(zoneName: Area, s: number, to: SlotRef): Waypoint[] {
+  const z = NET[zoneName];
+  return [...on(z.track, z.track.between(s, z.track.total)), ...on(LOOP, LOOP.between(z.exitLoopS, NET[to.zone].entryLoopS)), ...arrive(to.zone, to.slot)];
 }
 
 /** Route from a point on the main loop (distance loopS) to a slot: used to turn a crate round before it enters a zone. */

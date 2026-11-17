@@ -12,6 +12,7 @@ function world(start: Point) {
       get: (id: string) => crates.get(id),
       move: (id: string, p: Point) => crates.set(id, { ...p }),
       done: (id: string) => finished.push(id),
+      free: (at: Point, except: string) => ![...crates.entries()].some(([id, p]) => id !== except && Math.abs(p.x - at.x) < 50 && Math.abs(p.y - at.y) < 30),
     },
   };
 }
@@ -77,6 +78,17 @@ describe('storage crane', () => {
       elapsed += DT;
     }
     expect(elapsed).toBeGreaterThan(2);
+  });
+
+  it('collects a crate waiting on a spot before setting another crate down there', () => {
+    const w = world({ x: 300, y: 200 });
+    w.crates.set('waiting', { x: 100, y: 0 });
+    const crane = new Crane(HOME);
+    crane.request('c', { x: 100, y: 0 });
+    crane.request('waiting', { x: 400, y: 200 });
+    run(crane, w.api, 90);
+    expect(w.finished).toEqual(['waiting', 'c']);
+    expect(w.crates.get('c')).toEqual({ x: 100, y: 0 });
   });
 
   it('works through queued jobs one at a time', () => {

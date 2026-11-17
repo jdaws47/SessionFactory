@@ -30,8 +30,12 @@ export class AttachedTerminal {
       },
     });
     this.xterm.loadAddon(this.fit);
-    container.replaceChildren();
-    this.xterm.open(container);
+    // The fit addon sizes to its parent's box but ignores the parent's padding, so give it an unpadded host
+    // inside the padded container; otherwise the last row is clipped.
+    const host = document.createElement('div');
+    host.style.cssText = 'width:100%;height:100%;overflow:hidden';
+    container.replaceChildren(host);
+    this.xterm.open(host);
     this.fit.fit();
 
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -42,7 +46,7 @@ export class AttachedTerminal {
     this.xterm.onResize(({ cols, rows }) => this.send({ t: 'r', c: cols, r: rows }));
 
     this.observer = new ResizeObserver(() => this.refit());
-    this.observer.observe(container);
+    this.observer.observe(host);
     this.xterm.focus();
   }
 

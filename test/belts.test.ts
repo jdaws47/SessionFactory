@@ -95,6 +95,21 @@ describe('belt network', () => {
     expect(pts.some((p) => p.track === LOOP)).toBe(false);
   });
 
+  it('the dock recycle merge sits clear of every parked queue spot', async () => {
+    const { CRATE_W } = await import('../web/layout');
+    const recycle = NET.dock.recycle!;
+    const merge = NET.dock.track.at(recycle.mergeS);
+    for (const slot of NET.dock.slots) expect(Math.abs(slot.pos.x - merge.x)).toBeGreaterThanOrEqual(CRATE_W);
+  });
+
+  it('the dock recycle belt climbs back up far enough from the in-leg that crates on them cannot touch', async () => {
+    const { CRATE_W } = await import('../web/layout');
+    const { DOCK_IN_X } = await import('../web/belts');
+    const recycle = NET.dock.recycle!.track;
+    const upLegX = Math.max(...recycle.pts.filter((p) => p.y > 640 && p.y < 740).map((p) => p.x));
+    expect(DOCK_IN_X - upLegX).toBeGreaterThanOrEqual(CRATE_W + 4);
+  });
+
   it('crates going opposite ways on the main loop never overlap', async () => {
     const { CRATE_H } = await import('../web/layout');
     expect(LANE_BOTTOM - LANE_TOP).toBeGreaterThanOrEqual(CRATE_H + 10);

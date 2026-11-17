@@ -8,6 +8,8 @@ export interface CraneCrates {
   move(id: string, to: Point): void;
   /** The crane has set the crate down at the requested point. */
   done(id: string): void;
+  /** Whether nothing but `except` sits at this point. */
+  free(at: Point, except: string): boolean;
 }
 
 /**
@@ -47,6 +49,11 @@ export class Crane {
     return this.holding ? 1 - this.claw : 0;
   }
 
+  /** Where the crane has promised to set crates down (current job first, then queued ones). */
+  get reserved(): { id: string; to: Point }[] {
+    return [...(this.job ? [this.job] : []), ...this.queue];
+  }
+
   get busy(): boolean {
     return this.phase !== 'idle';
   }
@@ -54,6 +61,23 @@ export class Crane {
   request(id: string, to: Point): void {
     if (this.job?.id === id || this.queue.some((j) => j.id === id)) return;
     this.queue.push({ id, to: { x: to.x, y: to.y } });
+  }
+
+  /**
+   * Withdraws a crate's request, as long as the crane has not picked it up yet. Returns false if it is
+   * already holding (or setting down) that crate.
+   */
+  cancel(id: string): boolean {
+    if (this.holding === id) return false;
+    this.queue = this.queue.filter((j) => j.id !== id);
+    if (this.job?.id === id) {
+      if (this.phase !== 'settle' && this.phase !== 'travel' && this.phase !== 'lower') return false;
+      this.job = null;
+      this.claw = 0;
+      this.timer = 0;
+      this.goHome();
+    }
+    return true;
   }
 
   update(dt: number, crates: CraneCrates): void {
@@ -67,7 +91,7 @@ export class Crane {
     }
     switch (this.phase) {
       case 'idle':
-        if (this.queue.length) this.startNext();
+        if (this.queue.length) this.startNext(crates);
         break;
       case 'settle': {
         const at = this.job && crates.get(this.job.id);
@@ -96,6 +120,11 @@ export class Crane {
         if (this.holding) crates.move(this.holding, this.pos);
         break;
       case 'drop':
+        // Never set a crate down on top of another: hover until the spot is clear.
+        if (this.claw === 0 && !crates.free(this.job!.to, this.job!.id)) {
+          this.timer = this.pause;
+          break;
+        }
         if (this.moveClaw(dt, 1)) {
           crates.move(this.job!.id, this.job!.to);
           this.phase = 'release';
@@ -110,7 +139,7 @@ export class Crane {
         break;
       case 'raise':
         if (this.moveClaw(dt, 0)) {
-          if (this.queue.length) this.startNext();
+          if (this.queue.length) this.startNext(crates);
           else this.goHome();
         }
         break;
@@ -120,8 +149,10 @@ export class Crane {
     }
   }
 
-  private startNext(): void {
-    this.job = this.queue.shift()!;
+  /** Takes the oldest job whose set-down spot is free, so a crate waiting on the spot is collected first. */
+  private startNext(crates: CraneCrates): void {
+    const ready = this.queue.findIndex((j) => crates.free(j.to, j.id));
+    this.job = this.queue.splice(ready < 0 ? 0 : ready, 1)[0];
     this.phase = 'settle';
     this.timer = this.pause;
   }

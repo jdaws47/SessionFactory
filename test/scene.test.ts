@@ -57,3 +57,67 @@ describe('dock departures while a crate is still arriving', () => {
     expect(route(settledX).some((p) => p.track === NET.dock.track)).toBe(true);
   });
 });
+
+describe('crates never drive through each other', () => {
+  function overlapTest(seed: number, count = 12, every = 70) {
+    let r = seed;
+    const rnd = () => ((r = (r * 16807) % 2147483647) - 1) / 2147483646;
+    const zones: CrateView['zone'][] = ['working', 'dock', 'dock', 'alert', 'storage'];
+    const scene = new Scene();
+    const ids = Array.from({ length: count }, (_, i) => `c${i}`);
+    let crates = ids.map((id, i) => crate(id, zones[i % zones.length], i));
+    let clock = 1000;
+    scene.setCrates(crates, clock);
+    const internals = scene as unknown as { sprites: Map<string, Sprite & { at: { zone: string; slot: number }; pileRank: number }>; cranes: Record<string, { holding: string | null }> };
+    let worst = 0;
+    let worstPair = '';
+    let overlapFrames = 0;
+    // Pairs stacked in the same pile overlap by design until they have first moved apart.
+    const piled = new Set<string>();
+    for (let f = 0; f < 60 * 90; f++) {
+      if (f < 60 * 50 && f % every === 0) {
+        const pick = ids[Math.floor(rnd() * ids.length)];
+        clock += 1000;
+        crates = crates.map((c) => (c.id === pick ? { ...c, zone: zones[Math.floor(rnd() * zones.length)], zoneSince: clock } : c));
+        scene.setCrates(crates, clock);
+      }
+      scene.update(1 / 60);
+      const held = new Set(Object.values(internals.cranes).map((c) => c.holding));
+      const list = [...internals.sprites.entries()].filter(([id]) => !held.has(id));
+      for (let i = 0; i < list.length; i++) {
+        for (let j = i + 1; j < list.length; j++) {
+          const [ia, a] = list[i];
+          const [ib, b] = list[j];
+          const settled = (s: Sprite) => !s.path.length && !s.next;
+          const key = `${ia}/${ib}`;
+          const ox = Math.max(0, 118 - Math.abs(a.x - b.x));
+          const oy = Math.max(0, 56 - Math.abs(a.y - b.y));
+          const o = (ox * oy) / (118 * 56);
+          const sameSpot = a.at.zone === b.at.zone && a.at.slot === b.at.slot;
+          if (sameSpot && (settled(a) || settled(b))) piled.add(key);
+          if (o === 0) piled.delete(key);
+          if (piled.has(key)) continue;
+          if (o > 0.1) overlapFrames++;
+          if (o > worst) {
+            worst = o;
+            worstPair = `${ia}/${ib} at frame ${f}`;
+          }
+        }
+      }
+    }
+    const stuck = [...internals.sprites.entries()].filter(([, s]) => s.path.length || s.next).map(([id]) => id);
+    return { worst, worstPair, stuck, overlapFrames };
+  }
+
+  for (const seed of [7, 42, 1234]) {
+    it(`chaotic floor (seed ${seed}): a change every second never gridlocks`, () => {
+      expect(overlapTest(seed).stuck).toEqual([]);
+    });
+
+    it(`realistic floor (seed ${seed}): 8 sessions, a change every 4s, crates keep apart`, () => {
+      const { worstPair, stuck, overlapFrames } = overlapTest(seed, 8, 240);
+      expect(stuck).toEqual([]);
+      expect(overlapFrames, worstPair).toBe(0);
+    });
+  }
+});
