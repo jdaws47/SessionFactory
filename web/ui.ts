@@ -56,8 +56,10 @@ export class Ui {
   private moveNotice: { id: string; text: string } | null = null;
   private terminal: AttachedTerminal | null = null;
   private readonly alerts = new AlertNotifier();
-  private actionMap = new Map<string, () => void | Promise<void>>();
+  /** Click handlers by key. Page handlers are rebuilt on every state update; dialog handlers live until the dialog changes. */
+  private actionMap = new Map<string, { fn: () => void | Promise<void>; dialog: boolean }>();
   private actionSeq = 0;
+  private buildingDialog = false;
 
   private top = document.getElementById('topbar')!;
   private win = document.getElementById('crate-window')!;
@@ -74,7 +76,7 @@ export class Ui {
     document.addEventListener('click', (e) => {
       const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
       if (!el) return;
-      const fn = this.actionMap.get(el.dataset.act!);
+      const fn = this.actionMap.get(el.dataset.act!)?.fn;
       if (fn) Promise.resolve(fn()).catch((err) => this.toast(`Failed: ${(err as Error).message}`));
     });
     this.win.addEventListener('mousedown', (e) => {
@@ -167,8 +169,22 @@ export class Ui {
   /** Registers a click handler for this render pass and returns the attribute that triggers it. */
   act(fn: () => void | Promise<void>): string {
     const key = `a${++this.actionSeq}`;
-    this.actionMap.set(key, fn);
+    this.actionMap.set(key, { fn, dialog: this.buildingDialog });
     return `data-act="${key}"`;
+  }
+
+  /** Builds dialog markup whose handlers survive page re-renders (state updates arrive constantly). */
+  private inDialog<T>(build: () => T): T {
+    this.buildingDialog = true;
+    try {
+      return build();
+    } finally {
+      this.buildingDialog = false;
+    }
+  }
+
+  private clearActions(dialog: boolean): void {
+    for (const [key, a] of this.actionMap) if (a.dialog === dialog) this.actionMap.delete(key);
   }
 
   button(a: Action): string {
@@ -176,7 +192,7 @@ export class Ui {
   }
 
   private render(): void {
-    this.actionMap.clear();
+    this.clearActions(false);
     this.renderTop();
     this.renderWindow();
     this.renderInbox();
@@ -401,6 +417,14 @@ export class Ui {
   openNewSession(): void {
     const s = this.state;
     if (!s?.features.terminals) return;
+    this.clearActions(true);
+    this.inDialog(() => this.buildNewSession(s));
+    this.modal.hidden = false;
+    (document.getElementById('ns-label') as HTMLInputElement).focus();
+    if (s.features.jira) void this.loadTickets(false);
+  }
+
+  private buildNewSession(s: FactoryState): void {
     const close = () => {
       this.modal.hidden = true;
     };
@@ -420,9 +444,6 @@ export class Ui {
         <label>First prompt <span class="dim">(optional)</span><textarea id="ns-prompt" rows="4" placeholder="What should Claude start on?"></textarea></label>
         <div class="row end"><button class="btn plain" ${this.act(close)}>Cancel</button><button class="btn primary" ${start}>Start</button></div>
       </div>`;
-    this.modal.hidden = false;
-    (document.getElementById('ns-label') as HTMLInputElement).focus();
-    if (s.features.jira) void this.loadTickets(false);
   }
 
   private showTicketsOnFloor = false;
@@ -481,11 +502,12 @@ export class Ui {
       const live = tickets.filter((t) => t.liveCrateId);
       const shown = tickets.filter((t) => this.showTicketsOnFloor || !t.liveCrateId);
       const toggle = live.length
-        ? `<button class="linkish" ${this.act(() => { this.showTicketsOnFloor = !this.showTicketsOnFloor; render(); })}>${this.showTicketsOnFloor ? 'Hide' : 'Show'} ${live.length} already on the floor</button>`
+        ? `<button class="linkish" ${this.act(() => { this.showTicketsOnFloor = !this.showTicketsOnFloor; renderInDialog(); })}>${this.showTicketsOnFloor ? 'Hide' : 'Show'} ${live.length} already on the floor</button>`
         : '';
       box.innerHTML = (shown.length ? shown.map(row).join('') : '<div class="dim">Every assigned ticket already has a session on the floor.</div>') + toggle;
     };
-    render();
+    const renderInDialog = () => this.inDialog(render);
+    renderInDialog();
   }
 
   private renderInbox(): void {
