@@ -54,6 +54,8 @@ interface Sprite {
   stage?: 'cargo' | 'yard';
   /** Brought back from the warehouse: rides the train home, then heads for `at`. */
   returning?: boolean;
+  /** Fixed place in the wagon while riding the train, so crates don't shuffle when another is unloaded. */
+  wagonSlot?: number;
   pileRank: number;
   pileSize: number;
   /** Seconds spent waiting for the way to clear; past PATIENCE the crate eases through rather than gridlock. */
@@ -357,17 +359,21 @@ export class Scene {
     const craneAt = s.currentTo.zone !== to.zone ? s.path.findIndex((w) => w.crane) : -1;
     const hop = craneAt >= 0 ? s.path[craneAt] : undefined;
     const into = NET[s.currentTo.zone].slots[s.currentTo.slot];
-    if (hop && into.kind === 'crane' && hop.x === into.pos.x && hop.y === into.pos.y && this.craneFor(s.currentTo.zone).cancel(this.idOf(s))) {
-      s.path = [...s.path.slice(0, craneAt), ...onwardFrom(s.currentTo.zone, into.pickupS, to)];
+    const onward = hop && into.kind === 'crane' ? onwardFrom(s.currentTo.zone, into.pickupS, to) : [];
+    if (hop && into.kind === 'crane' && hop.x === into.pos.x && hop.y === into.pos.y && joins(s, s.path.slice(0, craneAt), onward) && this.craneFor(s.currentTo.zone).cancel(this.idOf(s))) {
+      s.path = [...s.path.slice(0, craneAt), ...onward];
       s.next = undefined;
       s.currentTo = to;
       s.at = to;
       return;
     }
-    // Heading for the dock but not on its belt yet: turn round on the main loop instead of entering.
-    const dockEntry = s.currentTo.zone === 'dock' && to.zone !== 'dock' ? s.path.findIndex((w) => w.track === NET.dock.track) : -1;
-    if (dockEntry > 0) {
-      s.path = [...s.path.slice(0, dockEntry), ...fromLoop(NET.dock.entryLoopS, to)];
+    // Heading for the dock from the main loop and not in yet: carry on round the loop instead of entering. (A crate
+    // already in the dock, e.g. going round its recycle loop, never qualifies: it finishes its trip first.)
+    const entry = s.currentTo.zone === 'dock' && to.zone !== 'dock' ? s.path.findIndex((w) => w.track === NET.dock.track) : -1;
+    const dockEntry = entry > 0 && s.path[entry - 1].track === LOOP ? entry : -1;
+    const turnRound = dockEntry > 0 ? fromLoop(NET.dock.entryLoopS, to) : [];
+    if (dockEntry > 0 && joins(s, s.path.slice(0, dockEntry), turnRound)) {
+      s.path = [...s.path.slice(0, dockEntry), ...turnRound];
       s.next = undefined;
       s.currentTo = to;
       s.at = to;
@@ -568,10 +574,17 @@ export class Scene {
     const train = this.train;
     train.update(dt);
     train.cargo = train.cargo.filter((id) => this.sprites.has(id));
-    train.cargo.forEach((id, i) => {
+    const taken = new Set(train.cargo.map((id) => this.sprites.get(id)!.wagonSlot).filter((n) => n !== undefined));
+    for (const id of train.cargo) {
       const s = this.sprites.get(id)!;
-      if (!this.heldBy(id)) Object.assign(s, train.wagonSpot(i));
-    });
+      if (s.wagonSlot === undefined) {
+        let n = 0;
+        while (taken.has(n)) n++;
+        s.wagonSlot = n;
+        taken.add(n);
+      }
+      if (!this.heldBy(id)) Object.assign(s, train.wagonSpot(s.wagonSlot));
+    }
     for (const [id, s] of this.sprites) {
       if (s.stage !== 'yard' || this.heldBy(id)) continue;
       const spot = this.stacks.spotOf(id);
@@ -583,8 +596,9 @@ export class Scene {
       for (const id of train.cargo.filter((cid) => this.sprites.get(cid)?.returning)) {
         // Home: the freight crane lifts it out of the wagon onto the belt, and it heads for its spot.
         const s = this.sprites.get(id)!;
-        Object.assign(s, { x: FREIGHT.wagon.x, y: FREIGHT.wagon.y, stage: undefined, returning: false, leaving: false });
-        s.path = travel({ zone: 'freight', slot: 0 }, s.at);
+        Object.assign(s, { stage: undefined, returning: false, leaving: false, wagonSlot: undefined });
+        // The freight crane lifts it from where it sits in the wagon.
+        s.path = [{ x: s.x, y: s.y }, ...travel({ zone: 'freight', slot: 0 }, s.at).slice(1)];
         s.next = undefined;
         s.currentTo = s.at;
         train.cargo = train.cargo.filter((cid) => cid !== id);
@@ -629,6 +643,7 @@ export class Scene {
         if (!s) return;
         if (job === 'store') {
           s.stage = 'yard';
+          s.wagonSlot = undefined;
           train.cargo = train.cargo.filter((cid) => cid !== id);
           // Brought back while it was being stacked: it waits for the next fetch.
         } else if (job === 'fetch') {
@@ -806,10 +821,9 @@ export class Scene {
       ctx.fillStyle = '#121315';
       ctx.fill();
     }
-    if (this.train.moving) {
-      smoke(ctx, engines[0] + 30, TRAIN_Y - 31, t, 0);
-      smoke(ctx, engines[1] + 10, TRAIN_Y - 31, t, 1);
-    }
+    // Only the engine in front, the one doing the pulling, smokes.
+    if (this.train.heading > 0) smoke(ctx, engines[1] + 10, TRAIN_Y - 31, t, 1);
+    if (this.train.heading < 0) smoke(ctx, engines[0] + 30, TRAIN_Y - 31, t, 0);
     ctx.fillStyle = C.dim;
     ctx.font = '600 11px system-ui, sans-serif';
     ctx.textAlign = 'center';
@@ -933,6 +947,15 @@ export class Scene {
       }
     }
   }
+}
+
+/**
+ * A rerouted path must carry on from exactly where the kept part ends (or from the crate itself): crates never
+ * jump. Rerouting that would break that is refused and the crate finishes its current trip instead.
+ */
+function joins(s: Point, kept: Point[], next: Point[]): boolean {
+  const from = kept.length ? kept[kept.length - 1] : s;
+  return next.length > 0 && Math.hypot(next[0].x - from.x, next[0].y - from.y) < 3;
 }
 
 function strokeTrack(ctx: CanvasRenderingContext2D, track: Track): void {

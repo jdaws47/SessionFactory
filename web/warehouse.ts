@@ -123,6 +123,11 @@ export class Train {
     return this.x !== this.target;
   }
 
+  /** +1 heading for the warehouse, -1 heading back to the factory, 0 standing. */
+  get heading(): number {
+    return Math.sign(this.target - this.x);
+  }
+
   goTo(where: 'factory' | 'warehouse'): void {
     this.target = where === 'factory' ? TRAIN.factoryX : TRAIN.warehouseX;
     this.idle = 0;

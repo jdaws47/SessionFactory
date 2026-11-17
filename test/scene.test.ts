@@ -58,6 +58,29 @@ describe('dock departures while a crate is still arriving', () => {
   });
 });
 
+describe('no teleporting', () => {
+  it('a crate going round the dock recycle loop that is sent elsewhere finishes the loop first', () => {
+    const scene = new Scene();
+    let crates = [crate('A', 'dock', 100), crate('B', 'dock', 200), crate('C', 'dock', 300)];
+    scene.setCrates(crates, 1000);
+    crates = crates.map((c) => (c.id === 'B' ? { ...c, zone: 'working', zoneSince: 400 } : c));
+    scene.setCrates(crates, 1100);
+    step(scene, 60, () => sprite(scene, 'A').path[0]?.track === NET.dock.recycle!.track);
+    expect(sprite(scene, 'A').path[0]?.track).toBe(NET.dock.recycle!.track);
+    let { x, y } = sprite(scene, 'A');
+    crates = crates.map((c) => (c.id === 'A' ? { ...c, zone: 'storage', zoneSince: 500 } : c));
+    scene.setCrates(crates, 1200);
+    let worst = 0;
+    for (let f = 0; f < 60 * 60; f++) {
+      scene.update(1 / 60);
+      const a = sprite(scene, 'A');
+      worst = Math.max(worst, Math.hypot(a.x - x, a.y - y));
+      ({ x, y } = a);
+    }
+    expect(worst).toBeLessThan(6);
+  });
+});
+
 describe('dock order', () => {
   it('when a middle crate leaves, the queue keeps its order (everyone circulates, nobody overtakes)', () => {
     const scene = new Scene();
@@ -96,6 +119,8 @@ describe('crates never drive through each other', () => {
     let worst = 0;
     let worstPair = '';
     let overlapFrames = 0;
+    let worstJump = 0;
+    const prev = new Map<string, { x: number; y: number }>();
     // Pairs stacked in the same pile overlap by design until they have first moved apart.
     const piled = new Set<string>();
     for (let f = 0; f < 60 * 90; f++) {
@@ -106,6 +131,12 @@ describe('crates never drive through each other', () => {
         scene.setCrates(crates, clock);
       }
       scene.update(1 / 60);
+      // Nothing ever jumps: a frame's move is at most the fastest belt/crane/train speed allows.
+      for (const [id, sp] of internals.sprites) {
+        const before = prev.get(id);
+        if (before) worstJump = Math.max(worstJump, Math.hypot(sp.x - before.x, sp.y - before.y));
+        prev.set(id, { x: sp.x, y: sp.y });
+      }
       const held = new Set(Object.values(internals.cranes).map((c) => c.holding));
       const list = [...internals.sprites.entries()].filter(([id]) => !held.has(id));
       for (let i = 0; i < list.length; i++) {
@@ -130,12 +161,14 @@ describe('crates never drive through each other', () => {
       }
     }
     const stuck = [...internals.sprites.entries()].filter(([, s]) => s.path.length || s.next).map(([id]) => id);
-    return { worst, worstPair, stuck, overlapFrames };
+    return { worst, worstPair, stuck, overlapFrames, worstJump };
   }
 
   for (const seed of [7, 42, 1234]) {
-    it(`chaotic floor (seed ${seed}): a change every second never gridlocks`, () => {
-      expect(overlapTest(seed).stuck).toEqual([]);
+    it(`chaotic floor (seed ${seed}): a change every second never gridlocks, and nothing ever jumps`, () => {
+      const { stuck, worstJump } = overlapTest(seed);
+      expect(stuck).toEqual([]);
+      expect(worstJump).toBeLessThan(6);
     });
 
     it(`realistic floor (seed ${seed}): 8 sessions, a change every 4s, crates keep apart`, () => {
