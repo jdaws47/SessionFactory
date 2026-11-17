@@ -2,6 +2,7 @@ import type { CrateView } from '../src/shared/types';
 import { ALL_TRACKS, BELT_SPEED, FREIGHT, fromHopper, fromLoop, onwardFrom, HOPPER_DROP, JUNCTIONS, LOOP, NET, type SlotRef, type Track, travel, type Waypoint, YARD } from './belts';
 import { AREAS, type Area, CRATE_H, CRATE_W, floorArea, H, HOPPER, MACHINE_H, MACHINE_W, OPERATOR, type Point, TRAIN_Y, W } from './layout';
 import { Crane } from './crane';
+import { Smoke } from './smoke';
 import { STACKS, Stacks, stackSpot, Train, TRAIN, WAREHOUSE_X, WORLD_W } from './warehouse';
 import { squircleAt, squirclePath } from './shapes';
 
@@ -160,6 +161,8 @@ export class Scene {
   private camTarget = 0;
   /** Warehouse search: crates that don't match are dimmed. */
   highlight = '';
+  private smoke = new Smoke();
+  private lastDraw = 0;
 
   setCrates(crates: CrateView[], now: number): void {
     const first = this.crates.size === 0 && this.sprites.size === 0;
@@ -697,6 +700,12 @@ export class Scene {
 
     const machines = this.machineStates();
     machines.forEach((m) => machineBack(ctx, m.pos, t, m.index, m.crate));
+    for (const m of machines) {
+      const stack = { x: m.pos.x + MACHINE_W / 2 - 18, y: m.pos.y - MACHINE_H / 2 - 16 };
+      const mode = m.crate ? (m.crate.zone === 'alert' ? 'jammed' : 'working') : 'idle';
+      this.smoke.source(`stack-${m.index}`, stack, mode === 'working', 'stack');
+      this.smoke.source(`belch-${m.index}`, stack, mode === 'jammed', 'belch');
+    }
 
     const q = this.highlight.trim().toLowerCase();
     for (const [id, s] of this.drawOrder()) {
@@ -711,6 +720,10 @@ export class Scene {
 
     machines.forEach((m) => machineFront(ctx, m.pos, t, m.crate));
     this.drawJamTag(ctx);
+    const dt = this.lastDraw ? Math.min(0.1, (t - this.lastDraw) / 1000) : 0;
+    this.lastDraw = t;
+    this.smoke.update(dt);
+    this.smoke.draw(ctx, (x, y, size) => squirclePath(ctx, x, y, size, size, size * 0.3));
     drawCrane(ctx, this.cranes.storage, YARD.rails);
     drawCrane(ctx, this.cranes.freight, FREIGHT.rails);
     drawCrane(ctx, this.gantry, STACKS.rails);
@@ -822,8 +835,8 @@ export class Scene {
       ctx.fill();
     }
     // Only the engine in front, the one doing the pulling, smokes.
-    if (this.train.heading > 0) smoke(ctx, engines[1] + 10, TRAIN_Y - 31, t, 1);
-    if (this.train.heading < 0) smoke(ctx, engines[0] + 30, TRAIN_Y - 31, t, 0);
+    this.smoke.source('engine-east', { x: engines[1] + 10, y: TRAIN_Y - 31 }, this.train.heading > 0, 'engine');
+    this.smoke.source('engine-west', { x: engines[0] + 30, y: TRAIN_Y - 31 }, this.train.heading < 0, 'engine');
     ctx.fillStyle = C.dim;
     ctx.font = '600 11px system-ui, sans-serif';
     ctx.textAlign = 'center';
@@ -1046,31 +1059,6 @@ function junction(ctx: CanvasRenderingContext2D, p: Point): void {
   fillSquircle(ctx, p.x - 9, p.y - 6, 18, 14, RADIUS.small, '#1d1f23');
 }
 
-function smoke(ctx: CanvasRenderingContext2D, x: number, y: number, t: number, seed: number): void {
-  for (let k = 0; k < 3; k++) {
-    const phase = (t / 3200 + k / 3 + seed * 0.17) % 1;
-    const size = 7 + phase * 12;
-    squirclePath(ctx, x + phase * 10 - size / 2, y - phase * 30 - size / 2, size, size, size * 0.3);
-    ctx.fillStyle = `rgba(205,200,192,${0.24 * (1 - phase)})`;
-    ctx.fill();
-  }
-}
-
-/** A jammed machine coughs out a burst of dark smoke each time its gears strain (same cycle as strain()). */
-function belch(ctx: CanvasRenderingContext2D, x: number, y: number, t: number, offset: number): void {
-  const since = ((t + offset) % 1600) / 1000;
-  if (since > 1.3) return;
-  const life = since / 1.3;
-  for (let k = 0; k < 3; k++) {
-    const size = 8 + life * 16 + k * 3;
-    const px = x + (k - 1) * 5 + life * 14;
-    const py = y - life * (26 + k * 8);
-    squirclePath(ctx, px - size / 2, py - size / 2, size, size, size * 0.3);
-    ctx.fillStyle = `rgba(28,26,24,${0.65 * (1 - life)})`;
-    ctx.fill();
-  }
-}
-
 function drawOperator(ctx: CanvasRenderingContext2D, t: number): void {
   const { x, y } = OPERATOR;
   // Workbench beside the operator, light metal so it reads against the floor.
@@ -1159,8 +1147,6 @@ function machineBack(ctx: CanvasRenderingContext2D, pos: Point, t: number, index
   ctx.fillRect(x, y, MACHINE_W, 7);
   ctx.restore();
   fillSquircle(ctx, x + MACHINE_W - 24, y - 12, 13, 16, RADIUS.small, '#4a4e55');
-  if (mode === 'working') smoke(ctx, x + MACHINE_W - 18, y - 16, t, index);
-  if (mode === 'jammed') belch(ctx, x + MACHINE_W - 18, y - 16, t, pos.x);
   fillSquircle(ctx, x + 6, y + 11, 7, 7, 2, mode === 'jammed' ? C.alert : mode === 'working' ? '#4ade80' : '#3b3f45');
 }
 
