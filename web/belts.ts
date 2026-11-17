@@ -257,11 +257,11 @@ const TOP_ROWS = [148, 292];
 export const MACHINE_COLUMNS = [450, 675, 900, 1125, 1350];
 
 export const HOPPER_DROP: Point = { x: 145, y: 220 };
-export const DOCK_FRONT_X = 491;
+export const DOCK_FRONT_X = 221;
 export const DOCK_Y = 585;
 export const RECYCLE_Y = 715;
-export const DOCK_IN_X = 1151;
-export const DOCK_OUT_X = 381;
+export const DOCK_IN_X = 881;
+export const DOCK_OUT_X = 111;
 /** Crate width plus a small gap. */
 const DOCK_SPACING = 128;
 
@@ -294,30 +294,30 @@ function dockLine(): ZoneNet {
  */
 export const FREIGHT = {
   busY: 582,
-  /** The out-leg sits as far left as the loop allows; the platform is centred between the legs. */
-  inX: 267,
-  outX: 113,
-  transfer: { x: 190, y: 582 },
-  wagon: { x: 190, y: 676 },
-  rails: { left: 136, right: 244, top: 562, bottom: 707 },
-  home: { x: 190, y: 629 },
+  /** Rightmost on the bottom row, so the train can run straight out to the warehouse. */
+  inX: 1483,
+  outX: 1329,
+  transfer: { x: 1406, y: 582 },
+  wagon: { x: 1406, y: 676 },
+  rails: { left: 1352, right: 1460, top: 562, bottom: 707 },
+  home: { x: 1406, y: 629 },
 };
 
 /** Storage yard: belt along the top, crane field below. */
 export const YARD = {
   busY: 582,
-  /** The yard belt's legs sit symmetrically about the yard centre (1375). */
-  inX: 1475,
-  outX: 1275,
+  /** The yard belt's legs sit symmetrically about the yard centre (1105). */
+  inX: 1205,
+  outX: 1005,
   /** One transfer point, the middle of the belt through the yard: crates are picked up and set down here. */
-  pickup: { x: 1375, y: 582 },
-  drop: { x: 1375, y: 582 },
-  columns: [1312, 1438],
+  pickup: { x: 1105, y: 582 },
+  drop: { x: 1105, y: 582 },
+  columns: [1042, 1168],
   rows: [662, 740, 818],
   /** Rails stand outside the belt's legs, with clear space between them and any crate in the yard. */
-  rails: { left: 1240, right: 1510, top: 562, bottom: 854 },
+  rails: { left: 970, right: 1240, top: 562, bottom: 854 },
   /** Where the crane parks between jobs: between the belt and the first row, under the transfer point. */
-  home: { x: 1375, y: 622 },
+  home: { x: 1105, y: 622 },
 };
 
 function freightStation(track: Track): CraneSlot[] {

@@ -45,7 +45,7 @@ export const MACHINE_W = 148;
 export const MACHINE_H = 76;
 export const TRAIN_Y = 688;
 /** The operator stands between the dock queue and its recycle belt, at the front. */
-export const OPERATOR: Point = { x: 491, y: 655 };
+export const OPERATOR: Point = { x: 221, y: 655 };
 
 export function inRect(p: Point, r: Rect): boolean {
   return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;

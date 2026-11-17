@@ -182,11 +182,13 @@ describe('platforms', () => {
     expect(new Set(bottom).size).toBe(1);
   });
 
-  it('leave equal gaps either side of the loading dock', async () => {
+  it('run loading dock, storage, freight from left to right with equal gaps', async () => {
     const { AREAS } = await import('../web/layout');
-    const left = AREAS.dock.x - (AREAS.freight.x + AREAS.freight.w);
-    const right = AREAS.storage.x - (AREAS.dock.x + AREAS.dock.w);
-    expect(Math.abs(left - right)).toBeLessThanOrEqual(2);
+    const { dock, storage, freight } = AREAS;
+    expect(dock.x < storage.x && storage.x < freight.x).toBe(true);
+    const a = storage.x - (dock.x + dock.w);
+    const b = freight.x - (storage.x + storage.w);
+    expect(Math.abs(a - b)).toBeLessThanOrEqual(2);
   });
 
   it('do not overlap each other', async () => {
