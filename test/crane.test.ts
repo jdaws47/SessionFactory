@@ -53,7 +53,21 @@ describe('storage crane', () => {
     expect(crane.busy).toBe(false);
   });
 
-  it('feels heavy: a short hop still takes several seconds', () => {
+  it('lifts the crate while carrying it and sets it down before letting go', () => {
+    const w = world({ x: 100, y: 0 });
+    const crane = new Crane(HOME);
+    crane.request('c', { x: 300, y: 200 });
+    let maxLift = 0;
+    let liftAtRelease = -1;
+    run(crane, w.api, 40, () => {
+      maxLift = Math.max(maxLift, crane.lift);
+      if (w.finished.length && liftAtRelease < 0) liftAtRelease = crane.lift;
+    });
+    expect(maxLift).toBe(1);
+    expect(liftAtRelease).toBe(0);
+  });
+
+  it('feels heavy: a short hop still takes a few seconds', () => {
     const w = world({ x: 480, y: 0 });
     const crane = new Crane(HOME);
     crane.request('c', { x: 480, y: 80 });
@@ -62,7 +76,7 @@ describe('storage crane', () => {
       crane.update(DT, w.api);
       elapsed += DT;
     }
-    expect(elapsed).toBeGreaterThan(4);
+    expect(elapsed).toBeGreaterThan(2);
   });
 
   it('works through queued jobs one at a time', () => {

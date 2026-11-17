@@ -29,12 +29,22 @@ export class Crane {
 
   constructor(
     readonly home: Point,
-    private readonly speed = 55,
-    private readonly pause = 0.45,
-    private readonly clawSeconds = 0.7,
+    private readonly speed = 110,
+    private readonly pause = 0.25,
+    private readonly clawSeconds = 0.45,
   ) {
     this.pos = { ...home };
     this.target = { ...home };
+  }
+
+  /** How closed the spreader's clamps are: 0 open, 1 gripping. */
+  get grip(): number {
+    return this.holding ? 1 : this.claw;
+  }
+
+  /** How high the held crate is: 0 resting, 1 fully lifted. */
+  get lift(): number {
+    return this.holding ? 1 - this.claw : 0;
   }
 
   get busy(): boolean {

@@ -371,11 +371,28 @@ export class Scene {
     ctx.restore();
     fillSquircle(ctx, r.left - 8, by - 6, r.right - r.left + 16, 4, 2, C.orange);
     const tx = crane.pos.x;
-    // Claw jaws reach out over the crate's ends as the claw lowers.
-    const reach = 18 + crane.claw * (CRATE_W / 2 - 14);
-    for (const dx of [-reach, reach - 4]) fillSquircle(ctx, tx + dx, by - 6, 4, 12 + crane.claw * 10, 1.5, '#9ca3af');
-    fillSquircle(ctx, tx - 18, by - 13, 36, 26, RADIUS.small, '#3a3e45');
-    fillSquircle(ctx, tx - 18, by - 13, 36, 5, 2, crane.busy ? '#4ade80' : '#57534e');
+    const ty = crane.pos.y;
+    // Spreader: four clamps that close onto the crate's corners, hung from the trolley by cables.
+    const scale = 1 + 0.08 * crane.lift;
+    const spreadX = (CRATE_W / 2 + 12 - 10 * crane.grip) * scale;
+    const spreadY = (CRATE_H / 2 + 12 - 10 * crane.grip) * scale;
+    const corners = [[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sy]) => ({ x: tx + sx * spreadX, y: ty + sy * spreadY }));
+    if (crane.busy) {
+      ctx.strokeStyle = 'rgba(200,205,212,0.7)';
+      ctx.lineWidth = 1.5;
+      for (const c of corners) {
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(c.x, c.y);
+        ctx.stroke();
+      }
+      for (const c of corners) {
+        fillSquircle(ctx, c.x - 6, c.y - 6, 12, 12, 3, '#3a3e45');
+        fillSquircle(ctx, c.x - 6, c.y - 6, 12, 3, 1.5, C.orange);
+      }
+    }
+    fillSquircle(ctx, tx - 18, ty - 13, 36, 26, RADIUS.small, '#3a3e45');
+    fillSquircle(ctx, tx - 18, ty - 13, 36, 5, 2, crane.busy ? '#4ade80' : '#57534e');
   }
 
   private machineStates(): { pos: Point; index: number; crate?: CrateView }[] {
@@ -489,18 +506,29 @@ export class Scene {
     const parked = c.zone === 'storage' && !moving;
     const buried = !moving && s.pileRank > 0;
 
-    const lifted = this.crane.holding === c.id;
+    const lifted = this.crane.holding === c.id ? this.crane.lift : 0;
+    ctx.save();
+    if (lifted) {
+      // Top-down: a lifted crate is closer to the camera (bigger) and its shadow falls further away.
+      const k = 1 + 0.08 * lifted;
+      ctx.translate(cx, y + CRATE_H / 2);
+      ctx.scale(k, k);
+      ctx.translate(-cx, -(y + CRATE_H / 2));
+    }
     ctx.save();
     ctx.globalAlpha = parked && !lifted ? 0.62 : 1;
     ctx.shadowColor = 'rgba(0,0,0,0.55)';
-    ctx.shadowBlur = lifted ? 18 : 8;
-    ctx.shadowOffsetY = lifted ? 16 : 4;
+    ctx.shadowBlur = 8 + 12 * lifted;
+    ctx.shadowOffsetY = 4 + 16 * lifted;
     const body = ctx.createLinearGradient(0, y, 0, y + CRATE_H);
     body.addColorStop(0, crateColor(c.id, 58));
     body.addColorStop(1, crateColor(c.id, 38));
     fillSquircle(ctx, x, y, CRATE_W, CRATE_H, RADIUS.crate, body);
     ctx.restore();
-    if (buried) return;
+    if (buried) {
+      ctx.restore();
+      return;
+    }
 
     ctx.save();
     ctx.globalAlpha = parked ? 0.62 : 1;
@@ -515,6 +543,7 @@ export class Scene {
     const lines = wrap(ctx, c.label, CRATE_W - 22, 2);
     const top = y + CRATE_H / 2 - (lines.length - 1) * 7 + 4;
     lines.forEach((l, i) => ctx.fillText(l, cx, top + i * 14));
+    ctx.restore();
     ctx.restore();
 
     if (selected || hover) {
