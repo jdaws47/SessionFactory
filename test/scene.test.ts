@@ -145,3 +145,39 @@ describe('crates never drive through each other', () => {
     });
   }
 });
+
+describe('freight train and warehouse', () => {
+  type Stage = Sprite & { stage?: string; at: { zone: string; slot: number } };
+  const st = (scene: Scene, id: string) => (scene as unknown as { sprites: Map<string, Stage> }).sprites.get(id)!;
+
+  it('archived crates ride the train to the warehouse and get stacked; bringing one back reverses the trip', () => {
+    const scene = new Scene();
+    let a = crate('A', 'dock', 100);
+    scene.setCrates([a], 1000);
+    a = { ...a, archived: true, archivedAt: 2000, zone: 'storage' };
+    scene.setCrates([a], 2000);
+
+    step(scene, 120, () => st(scene, 'A').stage === 'yard');
+    expect(st(scene, 'A').stage).toBe('yard');
+    expect(scene.stackOf('A')).toContain('A');
+    expect(st(scene, 'A').x).toBeGreaterThan(1600);
+
+    a = { ...a, archived: false, zone: 'storage' };
+    scene.setCrates([a], 3000);
+    step(scene, 180, () => {
+      const s = st(scene, 'A');
+      return !s.stage && !s.path.length && !s.next && s.at.zone === 'storage';
+    });
+    const back = st(scene, 'A');
+    expect(back.stage).toBeUndefined();
+    expect(back.x).toBeLessThan(1600);
+    expect(scene.train.atFactory).toBe(true);
+  });
+
+  it('crates archived before the page loaded are already on the stacks', () => {
+    const scene = new Scene();
+    scene.setCrates([{ ...crate('old', 'storage', 1), archived: true, archivedAt: 5 }], 1000);
+    expect(st(scene, 'old').stage).toBe('yard');
+    expect(st(scene, 'old').x).toBeGreaterThan(1600);
+  });
+});

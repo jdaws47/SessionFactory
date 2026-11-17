@@ -2,6 +2,7 @@ import type { CrateView } from '../src/shared/types';
 import { ALL_TRACKS, BELT_SPEED, FREIGHT, fromHopper, fromLoop, onwardFrom, HOPPER_DROP, JUNCTIONS, LOOP, NET, type SlotRef, type Track, travel, type Waypoint, YARD } from './belts';
 import { AREAS, type Area, CRATE_H, CRATE_W, floorArea, H, HOPPER, MACHINE_H, MACHINE_W, OPERATOR, type Point, TRAIN_Y, W } from './layout';
 import { Crane } from './crane';
+import { STACKS, Stacks, stackSpot, Train, TRAIN, WAREHOUSE_X, WORLD_W } from './warehouse';
 import { squircleAt, squirclePath } from './shapes';
 
 const C = {
@@ -49,6 +50,10 @@ interface Sprite {
   leaving: boolean;
   /** Seconds into being lowered into the freight wagon (archived crates only). */
   loading?: number;
+  /** Archived crates: riding the train ('cargo') or parked on a warehouse stack ('yard'). */
+  stage?: 'cargo' | 'yard';
+  /** Brought back from the warehouse: rides the train home, then heads for `at`. */
+  returning?: boolean;
   pileRank: number;
   pileSize: number;
   /** Seconds spent waiting for the way to clear; past PATIENCE the crate eases through rather than gridlock. */
@@ -141,6 +146,16 @@ export class Scene {
   private pendingLeave = new Set<string>();
   private lastCrates: CrateView[] = [];
   private cranes = { storage: new Crane(YARD.home), freight: new Crane(FREIGHT.home) };
+  readonly train = new Train();
+  private gantry = new Crane(STACKS.home, 260, 0.2, 0.35);
+  private stacks = new Stacks();
+  /** Warehouse gantry jobs in progress: storing a crate from the train, or fetching one for the train. */
+  private gantryJobs = new Map<string, 'store' | 'fetch'>();
+  /** Camera position along the two-screen world (0 = factory, WAREHOUSE_X = warehouse). */
+  camX = 0;
+  private camTarget = 0;
+  /** Warehouse search: crates that don't match are dimmed. */
+  highlight = '';
 
   setCrates(crates: CrateView[], now: number): void {
     const first = this.crates.size === 0 && this.sprites.size === 0;
@@ -213,14 +228,39 @@ export class Scene {
 
     for (const [id, s] of this.sprites) {
       const c = this.crates.get(id);
-      if (!c) this.sprites.delete(id);
-      else if (c.archived && !s.leaving) {
+      if (!c) {
+        this.sprites.delete(id);
+        this.stacks.remove(id);
+      } else if (c.archived && !s.leaving && !s.stage) {
         this.go(s, { zone: 'freight', slot: 0 });
         s.leaving = true;
         s.pileRank = 0;
         s.pileSize = 1;
+      } else if (c.archived && s.returning) {
+        s.returning = false;
       }
     }
+    // Archived crates the floor has never seen (first load, history import) are already in the warehouse.
+    for (const c of crates) {
+      if (!c.archived || this.sprites.has(c.id)) continue;
+      const spot = this.stacks.place(c.id);
+      const pos = stackSpot(spot.index, spot.level);
+      this.sprites.set(c.id, { ...pos, at: { zone: 'freight', slot: 0 }, currentTo: { zone: 'freight', slot: 0 }, path: [], leaving: true, stage: 'yard', pileRank: 0, pileSize: 1 });
+    }
+  }
+
+  panTo(where: 'factory' | 'warehouse'): void {
+    this.camTarget = where === 'factory' ? 0 : WAREHOUSE_X;
+  }
+
+  get onWarehouse(): boolean {
+    return this.camTarget === WAREHOUSE_X;
+  }
+
+  /** The crates on the same warehouse stack as this one, top first. */
+  stackOf(id: string): string[] {
+    const w = this.stacks.where(id);
+    return w ? [...this.stacks.stacks[w.index]].reverse() : [id];
   }
 
   /**
@@ -276,15 +316,18 @@ export class Scene {
       this.sprites.set(c.id, s);
       return;
     }
+    if (s.stage) {
+      // In the warehouse or on the train: it comes home by train first (see updateWarehouse()).
+      s.at = to;
+      s.returning = true;
+      s.pileRank = pileRank;
+      s.pileSize = pileSize;
+      return;
+    }
     if (s.leaving) {
+      // Still on its way to freight: just turn it round.
       s.leaving = false;
       s.loading = undefined;
-      s.path = [];
-      s.next = undefined;
-      s.x = FREIGHT.wagon.x;
-      s.y = FREIGHT.wagon.y;
-      s.at = { zone: 'freight', slot: 0 };
-      s.currentTo = s.at;
     }
     s.pileRank = pileRank;
     s.pileSize = pileSize;
@@ -349,7 +392,7 @@ export class Scene {
     const moving = (s: Sprite) => s.path.length > 0 || !!s.next;
     const rect = (x: number, y: number) => ({ x: x - CRATE_W / 2 + 3, y: y - CRATE_H / 2 + 3, w: CRATE_W - 6, h: CRATE_H - 6 });
     const hits = (a: ReturnType<typeof rect>, b: ReturnType<typeof rect>) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-    const solid = [...this.sprites.entries()].filter(([id, s]) => !held.has(id) && s.loading === undefined);
+    const solid = [...this.sprites.entries()].filter(([id, s]) => !held.has(id) && s.loading === undefined && !s.stage);
     // Spots a crane is going to set a crate down on count as occupied for everyone else.
     const reserved = Object.values(this.cranes).flatMap((c) => c.reserved);
     const blockers = new Map<string, Set<string>>();
@@ -429,8 +472,10 @@ export class Scene {
         }
         const p = s.path[0];
         if (p.crane) {
-          // Wait (belt stopped) until the crane comes over, picks the crate up and sets it down.
-          this.craneFor(p.crane).request(id, p);
+          // Wait (belt stopped) until the crane comes over, picks the crate up and sets it down. Crates for the
+          // wagon also wait for the train to be at the freight station.
+          const intoWagon = p.crane === 'freight' && p.x === FREIGHT.wagon.x && p.y === FREIGHT.wagon.y;
+          if (!intoWagon || this.train.atFactory) this.craneFor(p.crane).request(id, p);
           break;
         }
         const dx = p.x - s.x;
@@ -447,9 +492,11 @@ export class Scene {
           budget = 0;
         }
       }
-      if (s.leaving && !s.path.length && !s.next && !this.heldBy(id)) {
-        s.loading = (s.loading ?? 0) + dt;
-        if (s.loading >= LOAD_SECONDS) this.sprites.delete(id);
+      if (s.leaving && !s.stage && !s.path.length && !s.next && !this.heldBy(id) && this.train.atFactory) {
+        // Lowered into the wagon: it is cargo now.
+        s.stage = 'cargo';
+        this.train.cargo.push(id);
+        this.train.idle = 0;
       }
     }
     const crates = {
@@ -465,7 +512,7 @@ export class Scene {
       free: (at: Point, except: string) => {
         const mine = this.sprites.get(except)?.at;
         return ![...this.sprites.entries()].some(([oid, o]) => {
-          if (oid === except || this.heldBy(oid) || o.loading !== undefined) return false;
+          if (oid === except || this.heldBy(oid) || o.loading !== undefined || o.stage) return false;
           // Crates already stacked in the same pile spot don't stop the crane adding another.
           const pileMate = mine && !o.path.length && !o.next && o.at.zone === mine.zone && o.at.slot === mine.slot;
           return !pileMate && Math.abs(o.x - at.x) < CRATE_W - 6 && Math.abs(o.y - at.y) < CRATE_H - 6;
@@ -473,6 +520,9 @@ export class Scene {
       },
     };
     for (const crane of Object.values(this.cranes)) crane.update(dt, crates);
+    this.updateWarehouse(dt);
+    const gap = this.camTarget - this.camX;
+    this.camX = Math.abs(gap) < 0.5 ? this.camTarget : this.camX + gap * Math.min(1, dt * 5);
 
     // Crates rolling onto the dock belt join the back of the queue now, in the order they physically arrive.
     let joined = false;
@@ -504,12 +554,89 @@ export class Scene {
 
   /** The crane currently holding this crate, if any. */
   private heldBy(id: string): Crane | undefined {
-    return Object.values(this.cranes).find((c) => c.holding === id);
+    return [...Object.values(this.cranes), this.gantry].find((c) => c.holding === id);
+  }
+
+  /**
+   * The train and the warehouse gantry. At the freight station the train unloads crates coming home and takes on
+   * archived ones; once loading stops it runs to the warehouse, where the gantry stacks its cargo and loads any
+   * crates being brought back; then it returns.
+   */
+  private updateWarehouse(dt: number): void {
+    const train = this.train;
+    train.update(dt);
+    train.cargo = train.cargo.filter((id) => this.sprites.has(id));
+    train.cargo.forEach((id, i) => {
+      const s = this.sprites.get(id)!;
+      if (!this.heldBy(id)) Object.assign(s, train.wagonSpot(i));
+    });
+    for (const [id, s] of this.sprites) {
+      if (s.stage !== 'yard' || this.heldBy(id)) continue;
+      const spot = this.stacks.spotOf(id);
+      if (spot) Object.assign(s, spot);
+    }
+
+    if (train.atFactory) {
+      for (const id of train.cargo.filter((cid) => this.sprites.get(cid)?.returning)) {
+        // Home: the freight crane lifts it out of the wagon onto the belt, and it heads for its spot.
+        const s = this.sprites.get(id)!;
+        Object.assign(s, { x: FREIGHT.wagon.x, y: FREIGHT.wagon.y, stage: undefined, returning: false, leaving: false });
+        s.path = travel({ zone: 'freight', slot: 0 }, s.at);
+        s.next = undefined;
+        s.currentTo = s.at;
+        train.cargo = train.cargo.filter((cid) => cid !== id);
+      }
+      const onTheWay = [...this.sprites.values()].some((s) => s.leaving && !s.stage);
+      const wagonBusy = [...this.sprites.entries()].some(([id, s]) => !s.stage && (this.heldBy(id) === this.cranes.freight || Math.hypot(s.x - FREIGHT.wagon.x, s.y - FREIGHT.wagon.y) < 12));
+      const fetchWaiting = [...this.sprites.values()].some((s) => s.stage === 'yard' && s.returning);
+      if (!onTheWay && !wagonBusy && train.idle > 1.2 && (train.cargo.length || fetchWaiting)) train.goTo('warehouse');
+    }
+
+    if (train.atWarehouse) {
+      for (const id of train.cargo) {
+        const s = this.sprites.get(id)!;
+        if (s.returning || this.gantryJobs.has(id)) continue;
+        this.stacks.place(id);
+        this.gantryJobs.set(id, 'store');
+        this.gantry.request(id, this.stacks.spotOf(id)!);
+      }
+      for (const [id, s] of this.sprites) {
+        if (s.stage !== 'yard' || !s.returning || this.gantryJobs.has(id)) continue;
+        this.gantryJobs.set(id, 'fetch');
+        this.gantry.request(id, train.wagonSpot(train.cargo.length + [...this.gantryJobs.values()].filter((j) => j === 'fetch').length - 1));
+      }
+      if (!this.gantry.busy && !this.gantryJobs.size && train.idle > 0.8) train.goTo('factory');
+    }
+
+    this.gantry.update(dt, {
+      get: (id) => this.sprites.get(id),
+      move: (id, p) => {
+        const s = this.sprites.get(id);
+        if (s) Object.assign(s, { x: p.x, y: p.y });
+      },
+      done: (id) => {
+        const job = this.gantryJobs.get(id);
+        this.gantryJobs.delete(id);
+        const s = this.sprites.get(id);
+        if (!s) return;
+        if (job === 'store') {
+          s.stage = 'yard';
+          train.cargo = train.cargo.filter((cid) => cid !== id);
+          // Brought back while it was being stacked: it waits for the next fetch.
+        } else if (job === 'fetch') {
+          this.stacks.remove(id);
+          s.stage = 'cargo';
+          train.cargo.push(id);
+        }
+        train.idle = 0;
+      },
+      free: () => true,
+    });
   }
 
   hit(p: Point): string | null {
     for (const [id, s] of this.drawOrder().reverse()) {
-      if (s.leaving) continue;
+      if ((s.leaving && s.stage !== 'yard') || s.stage === 'cargo') continue;
       const { x, y } = this.pileOffset(s);
       if (Math.abs(p.x - x) <= CRATE_W / 2 + 3 && Math.abs(p.y - y) <= CRATE_H / 2 + 3) return id;
     }
@@ -517,7 +644,12 @@ export class Scene {
   }
 
   private drawOrder(): [string, Sprite][] {
-    return [...this.sprites.entries()].sort((a, b) => a[1].y - b[1].y || b[1].pileRank - a[1].pileRank);
+    // Warehouse stacks draw bottom crate first, so higher crates sit on top of lower ones.
+    const key = ([id, s]: [string, Sprite]) => {
+      const w = s.stage === 'yard' && !this.heldBy(id) ? this.stacks.where(id) : undefined;
+      return w ? stackSpot(w.index, 0).y + w.level * 0.01 : s.y;
+    };
+    return [...this.sprites.entries()].sort((a, b) => key(a) - key(b) || b[1].pileRank - a[1].pileRank);
   }
 
   private pileOffset(s: Sprite): Point {
@@ -532,6 +664,8 @@ export class Scene {
 
   draw(ctx: CanvasRenderingContext2D, t: number, opts: { hover: string | null; selected: string | null; terminals: boolean; pixelRatio: number }): void {
     this.drawStatic(ctx, opts.pixelRatio);
+    ctx.save();
+    ctx.translate(-this.camX, 0);
     for (const track of ALL_TRACKS) drawBelt(ctx, track, (i) => this.beltOffset.get(sectionKey(track, i)) ?? 0);
     for (const j of JUNCTIONS) junction(ctx, j);
     this.drawHopper(ctx, opts.terminals);
@@ -541,16 +675,24 @@ export class Scene {
     const machines = this.machineStates();
     machines.forEach((m) => machineBack(ctx, m.pos, t, m.index, m.crate));
 
+    const q = this.highlight.trim().toLowerCase();
     for (const [id, s] of this.drawOrder()) {
       const c = this.crates.get(id);
-      if (c) this.drawCrate(ctx, c, s, id === opts.hover, id === opts.selected);
+      if (!c) continue;
+      this.drawCrate(ctx, c, s, id === opts.hover, id === opts.selected);
+      // Warehouse search: crates that don't match fade back.
+      if (q && s.stage === 'yard' && ![c.label, c.jiraKey].some((f) => f?.toLowerCase().includes(q))) {
+        fillSquircle(ctx, s.x - CRATE_W / 2 - 1, s.y - CRATE_H / 2 - 1, CRATE_W + 2, CRATE_H + 2, RADIUS.crate, 'rgba(18,16,14,0.78)');
+      }
     }
 
     machines.forEach((m) => machineFront(ctx, m.pos, t, m.crate));
     this.drawJamTag(ctx);
     drawCrane(ctx, this.cranes.storage, YARD.rails);
     drawCrane(ctx, this.cranes.freight, FREIGHT.rails);
+    drawCrane(ctx, this.gantry, STACKS.rails);
     this.drawBadges(ctx);
+    ctx.restore();
   }
 
   /** Live tag beside the assembly hall title, only while some machine is jammed waiting on you. */
@@ -584,17 +726,18 @@ export class Scene {
     const key = `${ctx.canvas.width}x${ctx.canvas.height}`;
     if (!this.staticLayer || this.staticKey !== key) {
       const layer = document.createElement('canvas');
-      layer.width = ctx.canvas.width;
+      layer.width = Math.round(ctx.canvas.width * (WORLD_W / W));
       layer.height = ctx.canvas.height;
       const g = layer.getContext('2d')!;
       g.setTransform(ratio, 0, 0, ratio, 0, 0);
       paintScenery(g);
+      paintWarehouse(g);
       this.staticLayer = layer;
       this.staticKey = key;
     }
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.drawImage(this.staticLayer, 0, 0);
+    ctx.drawImage(this.staticLayer, -Math.round(this.camX * ratio), 0);
     ctx.restore();
   }
 
@@ -633,7 +776,7 @@ export class Scene {
 
   private drawTrain(ctx: CanvasRenderingContext2D, t: number): void {
     const a = AREAS.freight;
-    const wagonX = FREIGHT.wagon.x - 46;
+    const wagonX = this.train.x - 46;
     const locoX = wagonX + 100;
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.5)';
@@ -1104,9 +1247,31 @@ function paintScenery(g: CanvasRenderingContext2D): void {
   const plantRnd = seeded(11);
   for (const p of plants) plant(g, p.x, p.y, plantRnd);
 
+}
+
+/** The warehouse page: its own floor and a big platform for the stacks. */
+function paintWarehouse(g: CanvasRenderingContext2D): void {
+  const floor = g.createLinearGradient(0, 0, 0, H);
+  floor.addColorStop(0, C.floorTop);
+  floor.addColorStop(1, C.floorBottom);
+  g.fillStyle = floor;
+  g.fillRect(WAREHOUSE_X, 0, W, H);
+  const rnd = seeded(23);
+  for (let i = 0; i < 900; i++) {
+    g.fillStyle = `rgba(255,240,220,${rnd() * 0.035})`;
+    g.fillRect(WAREHOUSE_X + rnd() * W, rnd() * H, 2, 2);
+  }
+  const p = STACKS.platform;
+  foundation(g, 'warehouse', { ...p, title: 'WAREHOUSE', subtitle: 'archived sessions' });
+  paintRail(g);
+}
+
+/** Rail from the freight station across into the warehouse, drawn over both floors. */
+function paintRail(g: CanvasRenderingContext2D): void {
+  const from = AREAS.freight.x + 10;
+  const to = TRAIN.warehouseX + 150;
   g.fillStyle = '#3d3226';
-  const rail = AREAS.freight;
-  for (let x = rail.x + 16; x < rail.x + rail.w - 10; x += 13) {
+  for (let x = from + 6; x < to; x += 13) {
     squirclePath(g, x - 2.5, TRAIN_Y + 10, 5, 20, 1.5);
     g.fill();
   }
@@ -1114,10 +1279,11 @@ function paintScenery(g: CanvasRenderingContext2D): void {
   g.lineWidth = 3;
   for (const ry of [TRAIN_Y + 14, TRAIN_Y + 26]) {
     g.beginPath();
-    g.moveTo(rail.x + 10, ry);
-    g.lineTo(rail.x + rail.w - 10, ry);
+    g.moveTo(from, ry);
+    g.lineTo(to, ry);
     g.stroke();
   }
+  fillSquircle(g, to - 6, TRAIN_Y + 6, 12, 28, 3, '#b45f13');
 }
 
 function plant(g: CanvasRenderingContext2D, x: number, y: number, rnd: () => number): void {
@@ -1143,9 +1309,9 @@ function plant(g: CanvasRenderingContext2D, x: number, y: number, rnd: () => num
 }
 
 /** Title plates sit clear of the belts that enter each foundation. */
-const TITLE_INSET: Partial<Record<Area, number>> = { dock: 52, storage: 104 };
+const TITLE_INSET: Partial<Record<Area | 'warehouse', number>> = { dock: 52, storage: 104 };
 
-function foundation(g: CanvasRenderingContext2D, key: Area, a: (typeof AREAS)[Area]): void {
+function foundation(g: CanvasRenderingContext2D, key: Area | 'warehouse', a: (typeof AREAS)[Area]): void {
   g.save();
   g.shadowColor = 'rgba(0,0,0,0.6)';
   g.shadowBlur = 22;

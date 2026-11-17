@@ -30,7 +30,7 @@ function resize(): void {
 
 function toFloor(e: MouseEvent): Point {
   const r = canvas.getBoundingClientRect();
-  return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
+  return { x: (e.clientX - r.left) / scale + scene.camX, y: (e.clientY - r.top) / scale };
 }
 
 canvas.addEventListener('mousemove', (e) => {
@@ -49,7 +49,8 @@ canvas.addEventListener('mouseleave', () => {
 canvas.addEventListener('click', (e) => {
   const p = toFloor(e);
   const id = scene.hit(p);
-  if (id) ui.select(id);
+  if (id && state?.crates.find((c) => c.id === id)?.archived) ui.openStack(scene.stackOf(id), e.clientX, e.clientY);
+  else if (id) ui.select(id);
   else if (inRect(p, AREAS.freight)) ui.openWarehouse();
   else if (state?.features.terminals && inRect(p, HOPPER)) ui.openNewSession();
   else ui.select(null);
@@ -72,6 +73,22 @@ subscribe(
   },
   (up) => ui.setConnected(up),
 );
+
+// Sideways scroll or swipe pans between the factory and the warehouse.
+canvas.addEventListener(
+  'wheel',
+  (e) => {
+    const dx = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.shiftKey ? e.deltaY : 0;
+    if (Math.abs(dx) < 8) return;
+    e.preventDefault();
+    if (dx > 0) ui.openWarehouse();
+    else ui.showFactory();
+  },
+  { passive: false },
+);
+
+ui.onPan = (where) => scene.panTo(where);
+ui.onSearch = (q) => (scene.highlight = q);
 
 window.addEventListener('resize', resize);
 resize();

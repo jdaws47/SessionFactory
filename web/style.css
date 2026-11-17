@@ -917,3 +917,53 @@ textarea:focus {
   border-color: var(--orange);
   color: #1b0f02;
 }
+
+#wh-bar {
+  position: fixed;
+  top: 62px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  background: rgba(27, 30, 35, 0.92);
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+}
+
+#wh-find {
+  width: 260px;
+}
+
+#stack-panel {
+  position: fixed;
+  z-index: 14;
+  width: 280px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-top: 3px solid var(--orange);
+  border-radius: 8px;
+  padding: 8px 10px 10px;
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.6);
+}
+
+#stack-panel header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.stack-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}

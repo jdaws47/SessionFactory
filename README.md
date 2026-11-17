@@ -9,9 +9,11 @@ A factory floor for your Claude Code sessions. Each session started in `clean-ro
 | Jammed assembler **!** | Permission prompt or a question for you: the crate stays in its machine, the gears strain and stop, and a hazard frame and alert badge appear |
 | Loading dock | Turn finished; waiting for your next prompt (oldest at the front) |
 | Storage | Session ended; stays until you archive it (gets a "SHIP?" tag after 3 days) |
-| Freight → Warehouse | Archived. Browse, search and bring crates back from the Warehouse |
+| Freight → Warehouse | Archived. A crane loads the crate onto the freight train, which carries it to the warehouse page (to the right of the factory), where a gantry stacks it |
 
 Only **Archive** removes a crate from the floor.
+
+**Warehouse page:** click the freight station, use **Warehouse →**, or scroll sideways to pan right to the warehouse: a field of crate stacks under a gantry crane. Click a stack for its crates (Resume, Bring back, New session); the toolbar searches (non-matching crates fade), and **List view** shows everything on shelves. Bringing a crate back sends it home by train.
 
 The 🔕/🔔 button in the top bar turns on a chime when an assembler jams; if the tab is in the background you also get a desktop notification, and clicking it opens that crate. The top bar also counts finished turns today.
 

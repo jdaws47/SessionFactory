@@ -71,6 +71,12 @@ export class Ui {
   private warehouse = document.getElementById('warehouse')!;
   private modal = document.getElementById('modal')!;
   private toastEl = document.getElementById('toast')!;
+  private whBar = document.getElementById('wh-bar')!;
+  private stackPanel = document.getElementById('stack-panel')!;
+  /** Set by main: pan the camera, and highlight warehouse crates matching a search. */
+  onPan?: (where: 'factory' | 'warehouse') => void;
+  onSearch?: (query: string) => void;
+  private onWarehousePage = false;
 
   constructor() {
     document.addEventListener('click', (e) => {
@@ -91,7 +97,8 @@ export class Ui {
     });
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape' || (e.target as HTMLElement).closest('.xterm')) return;
-      if (!this.modal.hidden) this.modal.hidden = true;
+      if (!this.stackPanel.hidden) this.stackPanel.hidden = true;
+      else if (!this.modal.hidden) this.modal.hidden = true;
       else if (this.warehouseOpen) this.closeWarehouse();
       else this.select(null);
     });
@@ -124,10 +131,70 @@ export class Ui {
     this.renderWindow();
   }
 
+  /** Pans over to the warehouse page. */
   openWarehouse(): void {
+    this.onWarehousePage = true;
+    this.onPan?.('warehouse');
+    this.renderWarehouseBar();
+  }
+
+  /** Pans back to the factory floor. */
+  showFactory(): void {
+    this.onWarehousePage = false;
+    this.stackPanel.hidden = true;
+    this.onPan?.('factory');
+    this.renderWarehouseBar();
+  }
+
+  /** The shelf list of everything archived (search, sort, actions). */
+  openList(): void {
     this.warehouseOpen = true;
     this.renderWarehouse();
     this.warehouse.querySelector<HTMLInputElement>('#wh-search')?.focus();
+  }
+
+  /** Toolbar on the warehouse page. Built once so typing in the search box is never interrupted. */
+  private renderWarehouseBar(): void {
+    this.whBar.hidden = !this.onWarehousePage;
+    if (!this.whBar.childElementCount) {
+      this.whBar.innerHTML = `
+        <button class="btn plain" data-wh="factory">← Factory</button>
+        <input id="wh-find" placeholder="Find a crate by name or ticket…" />
+        <span class="dim" id="wh-n"></span>
+        <button class="btn plain" data-wh="list">List view</button>
+        <button class="btn plain" data-wh="import">Import older sessions</button>`;
+      this.whBar.addEventListener('click', (e) => {
+        const what = (e.target as HTMLElement).closest<HTMLElement>('[data-wh]')?.dataset.wh;
+        if (what === 'factory') this.showFactory();
+        else if (what === 'list') this.openList();
+        else if (what === 'import')
+          void post<{ added: number; scanned: number }>('/api/history/import').then(({ added, scanned }) =>
+            this.toast(added ? `Imported ${added} past session${added === 1 ? '' : 's'}` : `Nothing new (${scanned} past sessions already here)`),
+          );
+      });
+      this.whBar.querySelector<HTMLInputElement>('#wh-find')!.addEventListener('input', (e) => this.onSearch?.((e.target as HTMLInputElement).value));
+    }
+    const n = this.state?.crates.filter((c) => c.archived).length ?? 0;
+    this.whBar.querySelector('#wh-n')!.textContent = `${n} archived`;
+  }
+
+  /** A clicked warehouse stack: its crates (top first) with Resume / Bring back / New. */
+  openStack(ids: string[], clientX: number, clientY: number): void {
+    const s = this.state;
+    if (!s) return;
+    const crates = ids.map((id) => s.crates.find((c) => c.id === id)).filter((c): c is CrateView => !!c && c.archived);
+    if (!crates.length) return;
+    this.clearActions(true);
+    this.stackPanel.innerHTML = this.inDialog(
+      () => `<header><span>Stack · ${crates.length} crate${crates.length === 1 ? '' : 's'}</span><button class="icon" ${this.act(() => {
+        this.stackPanel.hidden = true;
+      })}>✕</button></header>
+        <div class="stack-list">${crates.map((c) => this.warehouseTile(c, s)).join('')}</div>`,
+    );
+    this.stackPanel.hidden = false;
+    const r = this.stackPanel.getBoundingClientRect();
+    this.stackPanel.style.left = `${Math.max(8, Math.min(clientX + 12, innerWidth - r.width - 8))}px`;
+    this.stackPanel.style.top = `${Math.max(60, Math.min(clientY - 20, innerHeight - r.height - 8))}px`;
   }
 
   closeWarehouse(): void {
@@ -194,6 +261,7 @@ export class Ui {
   private render(): void {
     this.clearActions(false);
     this.renderTop();
+    this.renderWarehouseBar();
     this.renderWindow();
     this.renderInbox();
     if (this.warehouseOpen) this.renderWarehouse(true);
@@ -216,7 +284,7 @@ export class Ui {
       </div>
       <div class="actions">
         ${s?.features.terminals ? this.button({ label: '+ New session', kind: 'primary', run: () => this.openNewSession() }) : ''}
-        ${this.button({ label: 'Warehouse', run: () => this.openWarehouse() })}
+        ${this.button({ label: this.onWarehousePage ? '← Factory' : 'Warehouse →', run: () => (this.onWarehousePage ? this.showFactory() : this.openWarehouse()) })}
         <button class="icon bell ${this.alerts.enabled ? 'on' : ''}" title="${this.alerts.enabled ? 'Alert sound on' : 'Alert sound off'}" ${this.act(async () => { await this.alerts.toggle(); this.renderTop(); })}>${this.alerts.enabled ? '🔔' : '🔕'}</button>
         <span class="conn ${this.connected ? 'up' : 'down'}" title="${this.connected ? 'connected' : 'reconnecting…'}"></span>
       </div>`;
@@ -406,12 +474,14 @@ export class Ui {
   }
 
   async resume(c: CrateView): Promise<void> {
+    this.stackPanel.hidden = true;
     await post(`/api/crates/${c.id}/resume`);
     this.closeWarehouse();
     this.select(c.id);
   }
 
   async continueLabel(c: CrateView): Promise<void> {
+    this.stackPanel.hidden = true;
     const { crateId } = await post<{ crateId: string }>(`/api/crates/${c.id}/continue`);
     this.closeWarehouse();
     this.select(crateId);
@@ -534,6 +604,7 @@ export class Ui {
   }
 
   async bringBack(c: CrateView): Promise<void> {
+    this.stackPanel.hidden = true;
     await post(`/api/crates/${c.id}/unarchive`);
     this.toast(`${c.label} is back on the floor`);
   }
