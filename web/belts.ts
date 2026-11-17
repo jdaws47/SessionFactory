@@ -403,6 +403,11 @@ export function travel(from: SlotRef, to: SlotRef, lap = false): Waypoint[] {
   return [...leave(from.zone, from.slot), ...on(LOOP, LOOP.between(NET[from.zone].exitLoopS, NET[to.zone].entryLoopS)), ...arrive(to.zone, to.slot)];
 }
 
+/** Route from a point on the main loop (distance loopS) to a slot: used to turn a crate round before it enters a zone. */
+export function fromLoop(loopS: number, to: SlotRef): Waypoint[] {
+  return [...on(LOOP, LOOP.between(loopS, NET[to.zone].entryLoopS)), ...arrive(to.zone, to.slot)];
+}
+
 /** Path for a brand-new crate dropped from the hopper onto the intake belt. */
 export function fromHopper(to: SlotRef): Waypoint[] {
   const intake = NET.intake;

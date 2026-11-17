@@ -1,5 +1,5 @@
 import type { CrateView } from '../src/shared/types';
-import { ALL_TRACKS, BELT_SPEED, FREIGHT, fromHopper, HOPPER_DROP, JUNCTIONS, LOOP, NET, type SlotRef, type Track, travel, type Waypoint, YARD } from './belts';
+import { ALL_TRACKS, BELT_SPEED, FREIGHT, fromHopper, fromLoop, HOPPER_DROP, JUNCTIONS, LOOP, NET, type SlotRef, type Track, travel, type Waypoint, YARD } from './belts';
 import { AREAS, type Area, CRATE_H, CRATE_W, floorArea, H, HOPPER, MACHINE_H, MACHINE_W, OPERATOR, type Point, TRAIN_Y, W } from './layout';
 import { Crane } from './crane';
 import { reorderQueue } from './queue';
@@ -133,6 +133,9 @@ export class Scene {
   /** The storage yard's crane; it carries crates between the belt and the yard and parks at home. */
   /** Physical order of crates on the dock belt, front first. */
   private dockQueue: string[] = [];
+  /** Crates told to leave while still riding the dock belt in: they settle first, then depart. */
+  private pendingLeave = new Set<string>();
+  private lastCrates: CrateView[] = [];
   private cranes = { storage: new Crane(YARD.home), freight: new Crane(FREIGHT.home) };
 
   setCrates(crates: CrateView[], now: number): void {
@@ -140,7 +143,9 @@ export class Scene {
     this.serverNow = now;
     this.clientAtSync = Date.now();
     this.crates = new Map(crates.map((c) => [c.id, c]));
+    this.lastCrates = crates;
     this.archivedCount = crates.filter((c) => c.archived).length;
+    const dockBelt = NET.dock.track;
 
     const byZone = new Map<Area, CrateView[]>();
     for (const c of crates) {
@@ -148,10 +153,23 @@ export class Scene {
       let area = floorArea(c.zone, c.turns);
       const existing = this.sprites.get(c.id);
       if (area === 'intake' && existing && !existing.leaving && existing.at.zone !== 'intake') area = 'dock';
+      // Already riding the dock belt in: it keeps its place until it has settled, then leaves (see update()).
+      const ridingIn = existing && !existing.leaving && existing.at.zone === 'dock' && existing.path[0]?.track === dockBelt;
+      if (area !== 'dock' && ridingIn) {
+        this.pendingLeave.add(c.id);
+        area = 'dock';
+      } else this.pendingLeave.delete(c.id);
       byZone.set(area, [...(byZone.get(area) ?? []), c]);
     }
 
     const docked = [...(byZone.get('dock') ?? [])].sort((a, b) => a.zoneSince - b.zoneSince);
+    // A crate that leaves before it reaches the dock belt was never really in the queue: nobody makes way.
+    const stillDocked = new Set(docked.map((c) => c.id));
+    this.dockQueue = this.dockQueue.filter((id) => {
+      if (stillDocked.has(id)) return true;
+      const s = this.sprites.get(id);
+      return !(s && s.path.findIndex((w) => w.track === dockBelt) > 0);
+    });
     const reordered = reorderQueue(this.dockQueue, new Set(docked.map((c) => c.id)), docked.map((c) => c.id));
     this.dockQueue = reordered.queue;
     const loopers = new Set(reordered.loopers);
@@ -244,6 +262,15 @@ export class Scene {
   /** Sends a sprite to a slot along the belts, after finishing the trip it is already on. */
   private go(s: Sprite, to: SlotRef, lap = false): void {
     const same = (a: SlotRef, b: SlotRef) => a.zone === b.zone && a.slot === b.slot;
+    // Heading for the dock but not on its belt yet: turn round on the main loop instead of entering.
+    const dockEntry = s.currentTo.zone === 'dock' && to.zone !== 'dock' ? s.path.findIndex((w) => w.track === NET.dock.track) : -1;
+    if (dockEntry > 0) {
+      s.path = [...s.path.slice(0, dockEntry), ...fromLoop(NET.dock.entryLoopS, to)];
+      s.next = undefined;
+      s.currentTo = to;
+      s.at = to;
+      return;
+    }
     if (!s.path.length && !s.next) {
       s.path = travel(s.currentTo, to, lap);
       s.currentTo = to;
@@ -308,6 +335,12 @@ export class Scene {
       },
     };
     for (const crane of Object.values(this.cranes)) crane.update(dt, crates);
+
+    const settled = [...this.pendingLeave].some((id) => {
+      const s = this.sprites.get(id);
+      return !s || (!s.path.length && !s.next);
+    });
+    if (settled) this.setCrates(this.lastCrates, this.now());
   }
 
   private craneFor(zone: Area): Crane {
