@@ -5,7 +5,6 @@ export const BELT_SPEED = 200;
 export const LANE_TOP = 415;
 export const LANE_BOTTOM = 465;
 const R = 22;
-const STUB_OFFSET = 16;
 
 export interface Pose extends Point {
   angle: number;
@@ -206,17 +205,23 @@ function bottomZoneTrack(xIn: number, xOut: number, busY: number): Point[] {
   ];
 }
 
-/** A slot with its own entrance and exit belts branching off the zone bus. dir is the bus flow (+1 right, −1 left). */
-function stubSlot(track: Track, busY: number, dir: 1 | -1, pos: Point): StubSlot {
-  const inX = pos.x - STUB_OFFSET * dir;
-  const outX = pos.x + STUB_OFFSET * dir;
-  const diverge = { x: inX - R * dir, y: busY };
-  const merge = { x: outX + R * dir, y: busY };
+/** Distance from a machine's centre to the belts that enter its left side and leave its right side. */
+const SIDE_BELT = 90;
+
+/**
+ * An assembler spot: a branch leaves the bus, runs up (or down) beside the machine and enters it from the
+ * left; the exit leaves from the right and runs back to the bus. The bus flows right.
+ */
+function stubSlot(track: Track, busY: number, pos: Point): StubSlot {
+  const inX = pos.x - SIDE_BELT;
+  const outX = pos.x + SIDE_BELT;
+  const diverge = { x: inX - R, y: busY };
+  const merge = { x: outX + R, y: busY };
   return {
     kind: 'stub',
     pos,
-    in: new Track(rounded([diverge, { x: inX, y: busY }, { x: inX, y: pos.y }], R)),
-    out: new Track(rounded([{ x: outX, y: pos.y }, { x: outX, y: busY }, merge], R)),
+    in: new Track(rounded([diverge, { x: inX, y: busY }, { x: inX, y: pos.y }, pos], R)),
+    out: new Track(rounded([pos, { x: outX, y: pos.y }, { x: outX, y: busY }, merge], R)),
     divergeS: track.project(diverge),
     mergeS: track.project(merge),
   };
@@ -256,7 +261,7 @@ function trackSlots(track: Track, positions: Point[]): TrackSlot[] {
 
 const TOP_BUS = 220;
 const TOP_ROWS = [148, 292];
-export const MACHINE_COLUMNS = [420, 620, 820, 1020, 1220, 1420];
+export const MACHINE_COLUMNS = [450, 682, 914, 1146, 1378];
 
 export const HOPPER_DROP: Point = { x: 145, y: 196 };
 export const DOCK_FRONT_X = 480;
@@ -310,7 +315,7 @@ function craneYard(track: Track): CraneSlot[] {
 
 export const NET: Record<Area, ZoneNet> = {
   intake: hopperLine(),
-  working: zone(topZoneTrack(310, 1530, TOP_BUS), (t) => TOP_ROWS.flatMap((y) => MACHINE_COLUMNS.map((x) => stubSlot(t, TOP_BUS, 1, { x, y })))),
+  working: zone(topZoneTrack(310, 1530, TOP_BUS), (t) => TOP_ROWS.flatMap((y) => MACHINE_COLUMNS.map((x) => stubSlot(t, TOP_BUS, { x, y })))),
   freight: zone(bottomZoneTrack(230, 60, FREIGHT_LOAD.y), (t) => trackSlots(t, [FREIGHT_LOAD])),
   dock: dockYard(),
   storage: zone(bottomZoneTrack(1540, 1180, YARD.busY), craneYard),

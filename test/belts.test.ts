@@ -46,6 +46,20 @@ describe('belt network', () => {
     }
   });
 
+  it('crates enter each assembler from its left side and leave from its right side', () => {
+    NET.working.slots.forEach((slot, i) => {
+      if (slot.kind !== 'stub') throw new Error('assembler spots are stubs');
+      const into = travel({ zone: 'dock', slot: 0 }, { zone: 'working', slot: i });
+      const [before, at] = into.slice(-3, -1);
+      expect(before.y).toBeCloseTo(slot.pos.y);
+      expect(before.x).toBeLessThan(at.x);
+      const out = travel({ zone: 'working', slot: i }, { zone: 'dock', slot: 0 });
+      const first = out.find((p) => p.x !== slot.pos.x || p.y !== slot.pos.y)!;
+      expect(first.y).toBeCloseTo(slot.pos.y);
+      expect(first.x).toBeGreaterThan(slot.pos.x);
+    });
+  });
+
   it('moves forward along the loading dock without leaving it', () => {
     const pts = travel({ zone: 'dock', slot: 3 }, { zone: 'dock', slot: 0 });
     expect(Math.max(...pts.map((p) => p.y))).toBeLessThanOrEqual(NET.dock.slots[0].pos.y + 0.5);
