@@ -823,10 +823,10 @@ function machineFront(ctx: CanvasRenderingContext2D, pos: Point, t: number, crat
   ctx.font = '700 10px ui-monospace, monospace';
   const label = short(sign, 22);
   const tw = ctx.measureText(label).width + 14;
-  const sx = mode === 'jammed' ? pos.x + 24 : pos.x - tw / 2;
+  const sx = pos.x - tw / 2;
   const sy = topRow ? pos.y - MACHINE_H / 2 - 20 : pos.y + MACHINE_H / 2 + 4;
-  fillSquircle(ctx, sx, sy, tw, 16, RADIUS.small, mode === 'jammed' ? '#450a0a' : '#121315');
-  ctx.fillStyle = mode === 'jammed' ? '#fecaca' : crate.waitingOn ? '#93c5fd' : C.amber;
+  fillSquircle(ctx, sx, sy, tw, 16, RADIUS.small, '#121315');
+  ctx.fillStyle = crate.waitingOn ? '#93c5fd' : C.amber;
   ctx.textAlign = 'center';
   ctx.fillText(label, sx + tw / 2, sy + 12);
 }
