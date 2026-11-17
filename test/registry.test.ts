@@ -132,7 +132,7 @@ describe('ready-to-ship hint', () => {
   });
 
   it('appears when the Jira ticket is resolved', () => {
-    reg.ingest(ev({ kind: 'prompt', sessionId: 'a', prompt: 'TF-1' }));
+    reg.ingest(ev({ kind: 'start', sessionId: 'a', title: 'TF-1' }));
     const id = reg.all()[0].id;
     reg.setJira(id, { status: 'Done', resolved: true }, 1);
     expect(reg.view(2)[0].readyToShip).toMatch(/Done/);

@@ -935,10 +935,21 @@ function drawOperator(ctx: CanvasRenderingContext2D, t: number): void {
   }
   fillSquircle(ctx, x - 12, y - 10, 24, 26, RADIUS.medium, '#2563eb');
   fillSquircle(ctx, x - 9, y - 26, 18, 18, RADIUS.medium, '#f1c27d');
-  // Hard hat: a domed shell over the top of the head, a raised centre ridge, and a slim front peak.
-  fillSquircle(ctx, x - 11, y - 33, 22, 15, 8, '#f59e0b');
-  fillSquircle(ctx, x - 2, y - 33, 4, 13, 2, '#fbbf24');
-  fillSquircle(ctx, x - 12, y - 20, 24, 3, 1.5, '#d97706');
+  // Hard hat: a domed shell (curved crown, flat base) over the head, a centre ridge, and a slim brim.
+  const brimY = y - 20;
+  ctx.beginPath();
+  ctx.moveTo(x - 11, brimY);
+  ctx.bezierCurveTo(x - 11, brimY - 17, x + 11, brimY - 17, x + 11, brimY);
+  ctx.closePath();
+  ctx.fillStyle = '#f59e0b';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(x - 2, brimY);
+  ctx.bezierCurveTo(x - 2, brimY - 13, x + 2, brimY - 13, x + 2, brimY);
+  ctx.closePath();
+  ctx.fillStyle = '#fbbf24';
+  ctx.fill();
+  fillSquircle(ctx, x - 13, brimY - 1, 26, 3, 1.5, '#d97706');
 }
 
 const TOP_ROW_Y = 148;
