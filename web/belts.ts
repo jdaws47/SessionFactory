@@ -15,6 +15,8 @@ export interface Pose extends Point {
 export class Track {
   readonly len: number[] = [0];
   readonly total: number;
+  /** Distances where independent belt sections meet (accumulation joints). Empty = one section. */
+  splits: number[] = [];
 
   constructor(
     readonly pts: Point[],
@@ -54,6 +56,19 @@ export class Track {
       if (d < best.d) best = { d, s: this.len[i - 1] + f * seg };
     }
     return best.s;
+  }
+
+  /** Index of the section containing distance s. */
+  sectionOf(s: number): number {
+    let i = 0;
+    while (i < this.splits.length && s >= this.splits[i]) i++;
+    return i;
+  }
+
+  /** [start, end] distance of every section. */
+  sections(): [number, number][] {
+    const edges = [0, ...this.splits, this.total];
+    return edges.slice(1).map((end, i) => [edges[i], end]);
   }
 
   /** Points travelled going forward from s0 to s1, wrapping around a closed loop. */
@@ -265,6 +280,8 @@ export interface Gate {
   zone: Area;
   /** Where the bar crosses the belt. */
   at: Point;
+  /** Distance of the gate along its zone belt; it bounds the front queue section. */
+  s: number;
   /** Direction the belt runs at the gate. */
   belt: 'h' | 'v';
   label: string[];
@@ -272,9 +289,20 @@ export interface Gate {
 
 /** Gates sit where crates wait, and say why they are waiting. They lift while the belt carries something. */
 export const GATES: Gate[] = [
-  { zone: 'dock', at: { x: DOCK_FRONT_X - 72, y: DOCK_Y }, belt: 'h', label: ['waiting', 'on you'] },
-  { zone: 'intake', at: { x: HOPPER_DROP.x, y: 375 }, belt: 'v', label: ['awaiting', 'prompt'] },
-];
+  { zone: 'dock' as const, at: { x: DOCK_FRONT_X - 72, y: DOCK_Y }, belt: 'h' as const, label: ['waiting', 'on you'] },
+  { zone: 'intake' as const, at: { x: HOPPER_DROP.x, y: 375 }, belt: 'v' as const, label: ['awaiting', 'prompt'] },
+].map((g) => ({ ...g, s: NET[g.zone].track.project(g.at) }));
+
+/**
+ * Queue belts are accumulation conveyors: one section per queue spot, plus the gate, so a crate joining
+ * the back runs only the sections behind the queue and the crates in front stay put.
+ */
+for (const g of GATES) {
+  const track = NET[g.zone].track;
+  const spots = NET[g.zone].slots.map((sl) => (sl.kind === 'track' ? sl.s : 0)).sort((a, b) => a - b);
+  const mids = spots.slice(1).map((s, i) => (s + spots[i]) / 2);
+  track.splits = [...mids, g.s].sort((a, b) => a - b);
+}
 
 /** Draw order: slot branches under zone belts, zone belts under the main loop. */
 export const ALL_TRACKS: Track[] = [

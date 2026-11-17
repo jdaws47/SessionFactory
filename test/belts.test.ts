@@ -65,6 +65,16 @@ describe('belt network', () => {
     expect(toWork.some((p) => p.track === LOOP)).toBe(true);
   });
 
+  it('a crate joining the back of the dock queue never runs the sections the crates in front sit on', () => {
+    const dock = NET.dock.track;
+    const front = NET.dock.slots[0];
+    if (front.kind !== 'track') throw new Error('dock spots are on the belt');
+    const pts = travel({ zone: 'working', slot: 0 }, { zone: 'dock', slot: 2 });
+    const sections = new Set(pts.filter((p) => p.track === dock).map((p) => dock.sectionOf(dock.project(p))));
+    expect(sections.has(dock.sectionOf(front.s))).toBe(false);
+    expect(dock.splits.length).toBe(NET.dock.slots.length);
+  });
+
   it('the loop is closed', () => {
     const start = LOOP.at(0);
     const end = LOOP.at(LOOP.total - 0.001);

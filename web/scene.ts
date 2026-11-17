@@ -125,9 +125,10 @@ export class Scene {
   private clientAtSync = Date.now();
   private staticLayer: HTMLCanvasElement | null = null;
   private staticKey = '';
-  /** How far each belt's sections have travelled; belts only advance while they carry something. */
-  private beltOffset = new Map<Track, number>();
-  private running = new Set<Track>([LOOP]);
+  /** How far each belt section has travelled (key "belt:section"); sections only advance while carrying something. */
+  private beltOffset = new Map<string, number>();
+  private running = new Set<string>([sectionKey(LOOP, 0)]);
+  private openGates = new Set<Gate>();
   /** Where the storage crane's trolley is; it stays where it last put something down. */
   private crane: Point = { x: (YARD.rails.left + YARD.rails.right) / 2, y: YARD.rails.top + 10 };
   private craneBusy = false;
@@ -242,20 +243,30 @@ export class Scene {
   }
 
   update(dt: number): void {
-    this.running = new Set([LOOP]);
+    this.running = new Set([sectionKey(LOOP, 0)]);
+    this.openGates = new Set();
     this.craneBusy = false;
     const yard = AREAS.storage;
     for (const s of this.sprites.values()) {
       if (!s.path.length && !s.next) continue;
       const target = s.path[0] ?? s.next?.path[0];
-      const near = target?.track;
-      if (near) this.running.add(near);
-      else if (s.x > yard.x && s.x < yard.x + yard.w && s.y > YARD.busY - 2 && s.y < yard.y + yard.h) {
-        this.craneBusy = true;
-        this.crane = { x: s.x, y: s.y };
+      const belt = target?.track;
+      if (!belt) {
+        if (s.x > yard.x && s.x < yard.x + yard.w && s.y > YARD.busY - 2 && s.y < yard.y + yard.h) {
+          this.craneBusy = true;
+          this.crane = { x: s.x, y: s.y };
+        }
+        continue;
+      }
+      const at = belt.project(s);
+      this.running.add(sectionKey(belt, belt.sectionOf(at)));
+      for (const g of GATES) {
+        const queue = NET[g.zone].track;
+        // Lift for a crate heading out through the gate, from the front spot until it is past.
+        if (belt === queue && at > g.s - 90 && at < g.s + 40 && s.path.some((w) => w.track === queue && queue.project(w) > g.s)) this.openGates.add(g);
       }
     }
-    for (const t of this.running) this.beltOffset.set(t, (this.beltOffset.get(t) ?? 0) + BELT_SPEED * dt);
+    for (const k of this.running) this.beltOffset.set(k, (this.beltOffset.get(k) ?? 0) + BELT_SPEED * dt);
 
     for (const [id, s] of this.sprites) {
       let budget = BELT_SPEED * dt;
@@ -312,7 +323,7 @@ export class Scene {
 
   draw(ctx: CanvasRenderingContext2D, t: number, opts: { hover: string | null; selected: string | null; terminals: boolean; pixelRatio: number }): void {
     this.drawStatic(ctx, opts.pixelRatio);
-    for (const track of ALL_TRACKS) drawBelt(ctx, track, this.beltOffset.get(track) ?? 0);
+    for (const track of ALL_TRACKS) drawBelt(ctx, track, (i) => this.beltOffset.get(sectionKey(track, i)) ?? 0);
     for (const j of JUNCTIONS) junction(ctx, j);
     this.drawHopper(ctx, opts.terminals);
     this.drawTrain(ctx, t);
@@ -358,7 +369,7 @@ export class Scene {
 
   /** A zone's gate is closed while its belt is stopped with crates waiting, and lifts while the belt runs. */
   private drawGate(ctx: CanvasRenderingContext2D, g: Gate): void {
-    const open = this.running.has(NET[g.zone].track);
+    const open = this.openGates.has(g);
     const waiting = [...this.sprites.values()].some((s) => !s.leaving && s.at.zone === g.zone && !s.path.length && !s.next);
     const { x, y } = g.at;
     const horizontalBelt = g.belt === 'h';
@@ -573,8 +584,34 @@ function strokeTrack(ctx: CanvasRenderingContext2D, track: Track): void {
   ctx.stroke();
 }
 
-/** Belt body, then plates with seams travelling in the belt's own direction. Later belts cover earlier ones at joins. */
-function drawBelt(ctx: CanvasRenderingContext2D, track: Track, travelled: number): void {
+const trackIds = new Map<Track, number>(ALL_TRACKS.map((t, i) => [t, i]));
+
+function sectionKey(track: Track, section: number): string {
+  return `${trackIds.get(track)}:${section}`;
+}
+
+const sectionPaths = new Map<Track, Point[][]>();
+
+function sectionPoints(track: Track): Point[][] {
+  let paths = sectionPaths.get(track);
+  if (!paths) {
+    paths = track.splits.length ? track.sections().map(([a, b]) => track.between(a, b)) : [track.closed ? [...track.pts, track.pts[0]] : track.pts];
+    sectionPaths.set(track, paths);
+  }
+  return paths;
+}
+
+function strokePoints(ctx: CanvasRenderingContext2D, pts: Point[]): void {
+  ctx.beginPath();
+  pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+  ctx.stroke();
+}
+
+/**
+ * Belt body, then plates with seams travelling in the belt's own direction, section by section.
+ * Section joints are drawn as dark rollers across the belt. Later belts cover earlier ones at joins.
+ */
+function drawBelt(ctx: CanvasRenderingContext2D, track: Track, travelled: (section: number) => number): void {
   ctx.save();
   ctx.lineJoin = 'round';
   ctx.lineCap = 'butt';
@@ -598,8 +635,21 @@ function drawBelt(ctx: CanvasRenderingContext2D, track: Track, travelled: number
   ctx.strokeStyle = C.section;
   ctx.lineWidth = 20;
   ctx.setLineDash([26, 4]);
-  ctx.lineDashOffset = -travelled;
-  strokeTrack(ctx, track);
+  sectionPoints(track).forEach((pts, i) => {
+    ctx.lineDashOffset = -travelled(i);
+    strokePoints(ctx, pts);
+  });
+  ctx.setLineDash([]);
+  for (const split of track.splits) {
+    const p = track.at(split);
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.angle);
+    squirclePath(ctx, -3, -14, 6, 28, 2);
+    ctx.fillStyle = '#0b0c0d';
+    ctx.fill();
+    ctx.restore();
+  }
   ctx.restore();
 }
 
