@@ -678,6 +678,21 @@ function smoke(ctx: CanvasRenderingContext2D, x: number, y: number, t: number, s
   }
 }
 
+/** A jammed machine coughs out a burst of dark smoke each time its gears strain (same cycle as strain()). */
+function belch(ctx: CanvasRenderingContext2D, x: number, y: number, t: number, offset: number): void {
+  const since = ((t + offset) % 1600) / 1000;
+  if (since > 1.3) return;
+  const life = since / 1.3;
+  for (let k = 0; k < 3; k++) {
+    const size = 8 + life * 16 + k * 3;
+    const px = x + (k - 1) * 5 + life * 14;
+    const py = y - life * (26 + k * 8);
+    squirclePath(ctx, px - size / 2, py - size / 2, size, size, size * 0.3);
+    ctx.fillStyle = `rgba(28,26,24,${0.65 * (1 - life)})`;
+    ctx.fill();
+  }
+}
+
 function drawOperator(ctx: CanvasRenderingContext2D, t: number): void {
   const { x, y } = OPERATOR;
   // Workbench beside the operator, light metal so it reads against the floor.
@@ -761,6 +776,7 @@ function machineBack(ctx: CanvasRenderingContext2D, pos: Point, t: number, index
   ctx.restore();
   fillSquircle(ctx, x + MACHINE_W - 24, y - 12, 13, 16, RADIUS.small, '#4a4e55');
   if (mode === 'working') smoke(ctx, x + MACHINE_W - 18, y - 16, t, index);
+  if (mode === 'jammed') belch(ctx, x + MACHINE_W - 18, y - 16, t, pos.x);
   fillSquircle(ctx, x + 6, y + 11, 7, 7, 2, mode === 'jammed' ? C.alert : mode === 'working' ? '#4ade80' : '#3b3f45');
 }
 
@@ -801,7 +817,8 @@ function machineFront(ctx: CanvasRenderingContext2D, pos: Point, t: number, crat
     ctx.fillText('!', pos.x, by + 27);
   }
 
-  const sign = mode === 'jammed' ? (crate.alertReason ?? 'needs you') : crate.waitingOn ? `⏳ ${crate.waitingOn}` : crate.lastTool;
+  if (mode === 'jammed') return;
+  const sign = crate.waitingOn ? `⏳ ${crate.waitingOn}` : crate.lastTool;
   if (!sign) return;
   ctx.font = '700 10px ui-monospace, monospace';
   const label = short(sign, 22);
