@@ -1,0 +1,195 @@
+import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import type { Crate, CrateView, JiraInfo } from '../shared/types';
+import type { FactoryEvent } from './events';
+import { DEFAULT_JIRA_PROJECTS, isWithin, refreshLabel, repoOf } from './labels';
+import { applyEvent, newCrate } from './machine';
+
+export const READY_TO_SHIP_AFTER_MS = 3 * 24 * 3600 * 1000;
+/** A /clear ends one session id and starts the next in the same process within moments. */
+const PID_RELINK_WINDOW_MS = 60_000;
+
+/**
+ * Persistent set of every crate the factory has seen. Crates are only ever hidden by archive();
+ * nothing here deletes one.
+ */
+export class Registry {
+  private crates = new Map<string, Crate>();
+  private saveTimer?: NodeJS.Timeout;
+  private listeners: Array<() => void> = [];
+
+  constructor(
+    private readonly file: string,
+    private readonly cleanRoot: string,
+    private readonly jiraProjects: string[] = DEFAULT_JIRA_PROJECTS,
+  ) {
+    if (fs.existsSync(file)) {
+      const saved = JSON.parse(fs.readFileSync(file, 'utf8')) as { crates: Crate[] };
+      for (const c of saved.crates) this.crates.set(c.id, c);
+    }
+  }
+
+  onChange(listener: () => void): void {
+    this.listeners.push(listener);
+  }
+
+  all(): Crate[] {
+    return [...this.crates.values()];
+  }
+
+  get(id: string): Crate | undefined {
+    return this.crates.get(id);
+  }
+
+  findBySlot(slot: string): Crate | undefined {
+    return this.all().find((c) => c.slot === slot);
+  }
+
+  /** Applies a hook event. Returns false for sessions outside clean-room, which are never tracked. */
+  ingest(ev: FactoryEvent): boolean {
+    if (!isWithin(ev.cwd, this.cleanRoot)) return false;
+    const crate = this.link(ev) ?? newCrate(ev, this.cleanRoot, randomUUID());
+    this.put(applyEvent(crate, ev, this.jiraProjects));
+    return true;
+  }
+
+  /** Creates the crate for a factory terminal before its Claude session reports in. */
+  preregister(slot: string, opts: { label?: string; jiraKey?: string; cwd?: string }, now: number): Crate {
+    const cwd = opts.cwd ?? this.cleanRoot;
+    const crate: Crate = {
+      ...newCrate({ at: now, sessionId: '', cwd, kind: 'start' }, this.cleanRoot, randomUUID()),
+      slot,
+      jiraKey: opts.jiraKey,
+    };
+    if (opts.label && !opts.jiraKey) {
+      crate.label = opts.label;
+      crate.labelSource = 'manual';
+    }
+    refreshLabel(crate, this.jiraProjects);
+    this.put(crate);
+    return crate;
+  }
+
+  /** Points an existing crate at a new factory terminal (resume / bring back). */
+  attachSlot(id: string, slot: string): void {
+    this.update(id, (c) => ({ ...c, slot }));
+  }
+
+  archive(id: string, now: number): void {
+    this.update(id, (c) =>
+      c.archived
+        ? c
+        : {
+            ...c,
+            archived: true,
+            archivedAt: now,
+            archiveCount: c.archiveCount + 1,
+            returned: undefined,
+            jira: c.jira ? { ...c.jira, statusAtArchive: c.jira.status } : c.jira,
+          },
+    );
+  }
+
+  unarchive(id: string, _now: number): void {
+    this.update(id, (c) =>
+      c.archived ? { ...c, archived: false, reactivationCount: c.reactivationCount + 1, returned: undefined } : c,
+    );
+  }
+
+  archiveLabel(label: string, now: number): number {
+    const matching = this.all().filter((c) => !c.archived && c.label === label);
+    for (const c of matching) this.archive(c.id, now);
+    return matching.length;
+  }
+
+  setLabel(id: string, label: string): void {
+    this.update(id, (c) => {
+      const next: Crate = { ...c };
+      if (label.trim()) {
+        next.label = label.trim();
+        next.labelSource = 'manual';
+      } else {
+        next.labelSource = 'auto';
+        refreshLabel(next, this.jiraProjects);
+      }
+      return next;
+    });
+  }
+
+  dismissReturned(id: string): void {
+    this.update(id, (c) => ({ ...c, returned: undefined }));
+  }
+
+  markReturned(id: string, reason: string, now: number): void {
+    this.update(id, (c) => (c.archived && !c.returned ? { ...c, returned: { reason, at: now } } : c));
+  }
+
+  setJira(id: string, info: Pick<JiraInfo, 'status' | 'resolved'>, now: number): void {
+    this.update(id, (c) => ({ ...c, jira: { ...c.jira, ...info, checkedAt: now } }));
+  }
+
+  /** Moves crates whose Claude process has gone away (crash, closed terminal) into storage. */
+  checkLiveness(isAlive: (pid: number) => boolean, now: number): void {
+    for (const c of this.all()) {
+      if (c.pid && c.zone !== 'storage' && !isAlive(c.pid)) {
+        this.put({ ...c, zone: 'storage', zoneSince: now, endedAt: now, alertReason: undefined });
+      }
+    }
+  }
+
+  view(now: number, liveSlots: Set<string> = new Set()): CrateView[] {
+    return this.all().map((c) => {
+      let readyToShip: string | undefined;
+      if (!c.archived) {
+        if (c.jira?.resolved) readyToShip = `ticket ${c.jira.status ?? 'resolved'}`;
+        else if (c.zone === 'storage' && c.endedAt && now - c.endedAt > READY_TO_SHIP_AFTER_MS) readyToShip = 'in storage 3+ days';
+      }
+      return { ...c, readyToShip, hasTerminal: !!c.slot && liveSlots.has(c.slot) };
+    });
+  }
+
+  close(): void {
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.saveTimer = undefined;
+    this.writeNow();
+  }
+
+  private link(ev: FactoryEvent): Crate | undefined {
+    const crates = this.all();
+    return (
+      crates.find((c) => c.sessionIds.includes(ev.sessionId)) ??
+      (ev.slot ? crates.find((c) => c.slot === ev.slot) : undefined) ??
+      (ev.pid
+        ? crates.find((c) => c.pid === ev.pid && (!c.endedAt || ev.at - c.endedAt < PID_RELINK_WINDOW_MS))
+        : undefined)
+    );
+  }
+
+  private update(id: string, fn: (c: Crate) => Crate): void {
+    const c = this.crates.get(id);
+    if (c) this.put(fn(c));
+  }
+
+  private put(crate: Crate): void {
+    if (!crate.repo) crate.repo = repoOf(crate.cwd, this.cleanRoot);
+    this.crates.set(crate.id, crate);
+    this.scheduleSave();
+    for (const l of this.listeners) l();
+  }
+
+  private scheduleSave(): void {
+    if (this.saveTimer) return;
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = undefined;
+      this.writeNow();
+    }, 250);
+  }
+
+  private writeNow(): void {
+    fs.mkdirSync(path.dirname(this.file), { recursive: true });
+    const tmp = `${this.file}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ version: 1, crates: this.all() }, null, 1));
+    fs.renameSync(tmp, this.file);
+  }
+}

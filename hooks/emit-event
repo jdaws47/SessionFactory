@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Observe-only Claude Code hook for Session Factory.
+# Appends the hook payload to session-factory/data/events/ and always exits 0.
+# It prints nothing, so it never blocks, allows, or changes anything Claude does.
+{
+  events_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/data/events"
+  mkdir -p "$events_dir"
+
+  # Walk up from the hook's parent to find the claude process, for liveness checks.
+  claude_pid=""
+  pid=$PPID
+  for _ in 1 2 3 4; do
+    comm=$(ps -o comm= -p "$pid" 2>/dev/null) || break
+    if [[ "$comm" == claude* ]]; then claude_pid=$pid; break; fi
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    [[ -z "$pid" || "$pid" -le 1 ]] && break
+  done
+
+  at=$(date +%s%3N)
+  name="$at-$$-$RANDOM"
+  slot="${SF_SLOT//[^A-Za-z0-9_-]/}"
+  payload=$(cat)
+  printf '{"sf":{"at":%s,"pid":%s,"slot":"%s"},"payload":%s}\n' \
+    "$at" "${claude_pid:-null}" "$slot" "${payload:-null}" > "$events_dir/.$name.tmp"
+  mv "$events_dir/.$name.tmp" "$events_dir/$name.json"
+} >/dev/null 2>&1
+exit 0

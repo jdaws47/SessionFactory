@@ -1,0 +1,31 @@
+{
+  "name": "session-factory",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local factory-floor view of Claude Code sessions running in clean-room",
+  "type": "module",
+  "scripts": {
+    "start": "vite build && tsx src/server/main.ts",
+    "server": "tsx src/server/main.ts",
+    "dev:server": "tsx watch src/server/main.ts",
+    "dev:web": "vite",
+    "build": "vite build",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "hooks": "node scripts/hooks.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "ws": "8.22.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.0",
+    "@types/ws": "8.18.1",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vite": "8.3.5",
+    "vitest": "4.1.12"
+  }
+}
