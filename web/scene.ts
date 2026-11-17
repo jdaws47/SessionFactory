@@ -667,9 +667,11 @@ function drawOperator(ctx: CanvasRenderingContext2D): void {
   fillSquircle(ctx, x - 34, y + 14, 68, 22, RADIUS.small, '#3a3026');
   fillSquircle(ctx, x - 26, y + 17, 24, 10, RADIUS.small, '#5bc0eb');
   fillSquircle(ctx, x - 12, y - 10, 24, 26, RADIUS.medium, '#2563eb');
-  fillSquircle(ctx, x - 9, y - 28, 18, 18, RADIUS.medium, '#f1c27d');
-  fillSquircle(ctx, x - 12, y - 32, 24, 9, RADIUS.small, C.orange);
-  fillSquircle(ctx, x - 15, y - 25, 30, 4, 2, C.orange);
+  fillSquircle(ctx, x - 9, y - 26, 18, 18, RADIUS.medium, '#f1c27d');
+  // Hard hat: a domed shell over the top of the head, a raised centre ridge, and a slim front peak.
+  fillSquircle(ctx, x - 11, y - 33, 22, 15, 8, '#f59e0b');
+  fillSquircle(ctx, x - 2, y - 33, 4, 13, 2, '#fbbf24');
+  fillSquircle(ctx, x - 12, y - 20, 24, 3, 1.5, '#d97706');
 }
 
 const MACHINE_W = 148;
