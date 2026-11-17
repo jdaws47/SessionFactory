@@ -194,15 +194,19 @@ describe('freight train and warehouse', () => {
 });
 
 describe('warehouse layout', () => {
-  it('keeps every crate spot inside the building, clear of the train at its stop', async () => {
-    const { STACKS, stackCentre, TRAIN } = await import('../web/warehouse');
+  it('keeps every crate spot inside the building, clear of the train at its stop and of the gantry rails', async () => {
+    const { STACKS, SPOTS, TRAIN } = await import('../web/warehouse');
     const p = STACKS.platform;
-    const trainRight = TRAIN.warehouseX + 86;
-    for (let i = 0; i < STACKS.field.cols * STACKS.field.rows; i++) {
-      const c = stackCentre(i);
-      expect(c.x - 59).toBeGreaterThan(trainRight + 10);
-      expect(c.x + 59).toBeLessThan(p.x + p.w);
+    const train = { left: TRAIN.warehouseX - 86, right: TRAIN.warehouseX + 86, top: TRAIN.railY - 34, bottom: TRAIN.railY + 42 };
+    expect(SPOTS.length).toBeGreaterThanOrEqual(90);
+    for (const c of SPOTS) {
+      const clearOfTrain = c.x + 59 < train.left || c.x - 59 > train.right || c.y + 28 < train.top || c.y - 28 > train.bottom;
+      expect(clearOfTrain).toBe(true);
+      expect(c.x - 59).toBeGreaterThan(STACKS.rails.left + 4);
+      expect(c.x + 59).toBeLessThan(STACKS.rails.right - 4);
       expect(c.y + 28).toBeLessThan(p.y + p.h);
     }
+    // The train stops clear of the gantry's left rail.
+    expect(train.left).toBeGreaterThan(STACKS.rails.left + 10);
   });
 });

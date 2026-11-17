@@ -8,7 +8,8 @@ export const WORLD_W = W * 2;
 /** The freight train shuttles along the rail between the freight station and the warehouse platform. */
 export const TRAIN = {
   factoryX: FREIGHT.wagon.x,
-  warehouseX: WAREHOUSE_X + 150,
+  /** Pulled well in, clear of the gantry's left rail. */
+  warehouseX: WAREHOUSE_X + 200,
   /** Where crates ride on the wagon (relative to the train's x). */
   wagonY: FREIGHT.wagon.y,
   railY: TRAIN_Y,
@@ -24,17 +25,30 @@ export const STACKS = {
   rails: { left: PLATFORM.x + 24, right: PLATFORM.x + PLATFORM.w - 24, top: PLATFORM.y + 52, bottom: PLATFORM.y + PLATFORM.h - 14 },
   /** Parks top-left, out of the way. */
   home: { x: PLATFORM.x + 70, y: PLATFORM.y + 52 },
-  /** Starts just past the train stop's far engine; 9 x 10 spots. */
-  field: { x: WAREHOUSE_X + 262, y: 112, cols: 9, rows: 10, cw: 136, ch: 74 },
+  /** Fills the building from the left wall; spots over the train's track are left out (see SPOTS). */
+  field: { x: PLATFORM.x + 44, y: 112, cols: 10, rows: 10, cw: 136, ch: 74 },
   levels: 1,
   lift: 0,
 };
 
-export function stackCentre(index: number): Point {
+/** The train (both engines) and its track at the warehouse stop, which crate spots keep clear of. */
+const TRAIN_FOOTPRINT = { x: TRAIN.warehouseX - 96, y: TRAIN.railY - 40, w: 206, h: 84 };
+
+function gridCentre(col: number, row: number): Point {
   const f = STACKS.field;
-  const col = Math.floor(index / f.rows);
-  const row = index % f.rows;
   return { x: f.x + col * f.cw + f.cw / 2, y: f.y + row * f.ch + f.ch / 2 };
+}
+
+/** Every usable crate spot, column by column from the train side; spots that would sit on the train are skipped. */
+export const SPOTS: Point[] = Array.from({ length: STACKS.field.cols * STACKS.field.rows }, (_, i) =>
+  gridCentre(Math.floor(i / STACKS.field.rows), i % STACKS.field.rows),
+).filter((c) => {
+  const t = TRAIN_FOOTPRINT;
+  return c.x + 59 < t.x || c.x - 59 > t.x + t.w || c.y + 28 < t.y || c.y - 28 > t.y + t.h;
+});
+
+export function stackCentre(index: number): Point {
+  return SPOTS[Math.min(index, SPOTS.length - 1)];
 }
 
 /** Where a crate at a given level of a stack sits. */
@@ -48,7 +62,7 @@ export function stackSpot(index: number, level: number): Point {
  * first stack with room, filling from the train side outwards; taking a crate out lets the ones above settle.
  */
 export class Stacks {
-  readonly stacks: string[][] = Array.from({ length: STACKS.field.cols * STACKS.field.rows }, () => []);
+  readonly stacks: string[][] = Array.from({ length: SPOTS.length }, () => []);
 
   place(id: string): { index: number; level: number } {
     const found = this.where(id);
