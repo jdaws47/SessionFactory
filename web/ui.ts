@@ -1,4 +1,5 @@
 import type { CrateView, FactoryState, JiraTicket } from '../src/shared/types';
+import { AlertNotifier } from './alerts';
 import { get, post } from './api';
 import { repoColor } from './scene';
 import { AttachedTerminal } from './terminal';
@@ -46,6 +47,7 @@ export class Ui {
   private archiveMenu = false;
   private fullScreen = false;
   private terminal: AttachedTerminal | null = null;
+  private readonly alerts = new AlertNotifier();
   private actionMap = new Map<string, () => void | Promise<void>>();
   private actionSeq = 0;
 
@@ -91,6 +93,7 @@ export class Ui {
 
   setState(state: FactoryState): void {
     this.state = state;
+    this.alerts.onState(state, (id) => this.select(id));
     if (this.selected && !state.crates.find((c) => c.id === this.selected && !c.archived)) this.select(null);
     this.render();
   }
@@ -184,10 +187,12 @@ export class Ui {
         <span class="stat"><b>${count('intake')}</b> intake</span>
         <span class="stat dim"><b>${count('storage')}</b> ended</span>
         <span class="stat dim"><b>${(s?.crates.length ?? 0) - live.length}</b> archived</span>
+        <span class="stat produced" title="Finished turns since midnight"><b>${s?.stats.turnsToday ?? 0}</b> turns today</span>
       </div>
       <div class="actions">
         ${s?.features.terminals ? this.button({ label: '+ New session', kind: 'primary', run: () => this.openNewSession() }) : ''}
         ${this.button({ label: 'Warehouse', run: () => this.openWarehouse() })}
+        <button class="icon bell ${this.alerts.enabled ? 'on' : ''}" title="${this.alerts.enabled ? 'Alert sound on' : 'Alert sound off'}" ${this.act(async () => { await this.alerts.toggle(); this.renderTop(); })}>${this.alerts.enabled ? '🔔' : '🔕'}</button>
         <span class="conn ${this.connected ? 'up' : 'down'}" title="${this.connected ? 'connected' : 'reconnecting…'}"></span>
       </div>`;
   }

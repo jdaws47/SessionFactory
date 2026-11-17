@@ -663,3 +663,16 @@ textarea:focus {
   color: var(--dim);
   font-size: 12px;
 }
+
+.stat.produced b {
+  color: var(--amber);
+}
+
+.icon.bell {
+  font-size: 16px;
+  opacity: 0.6;
+}
+
+.icon.bell.on {
+  opacity: 1;
+}

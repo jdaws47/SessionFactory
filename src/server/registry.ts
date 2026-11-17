@@ -18,6 +18,8 @@ export class Registry {
   private crates = new Map<string, Crate>();
   private saveTimer?: NodeJS.Timeout;
   private listeners: Array<() => void> = [];
+  /** Timestamps of finished turns over the last week, for the throughput counter. */
+  private turnLog: number[] = [];
 
   constructor(
     private readonly file: string,
@@ -25,8 +27,9 @@ export class Registry {
     private readonly jiraProjects: string[] = DEFAULT_JIRA_PROJECTS,
   ) {
     if (fs.existsSync(file)) {
-      const saved = JSON.parse(fs.readFileSync(file, 'utf8')) as { crates: Crate[] };
+      const saved = JSON.parse(fs.readFileSync(file, 'utf8')) as { crates: Crate[]; turnLog?: number[] };
       for (const c of saved.crates) this.crates.set(c.id, c);
+      this.turnLog = saved.turnLog ?? [];
     }
   }
 
@@ -50,6 +53,10 @@ export class Registry {
   ingest(ev: FactoryEvent): boolean {
     if (!isWithin(ev.cwd, this.cleanRoot)) return false;
     const crate = this.link(ev) ?? { ...newCrate(ev, this.cleanRoot, randomUUID()), slot: ev.slot };
+    if (ev.kind === 'stop' && !ev.waitingOn) {
+      this.turnLog.push(ev.at);
+      this.turnLog = this.turnLog.filter((t) => ev.at - t < 7 * 24 * 3600 * 1000);
+    }
     this.put(applyEvent(crate, ev, this.jiraProjects));
     return true;
   }
@@ -161,6 +168,11 @@ export class Registry {
     });
   }
 
+  /** Finished turns since local midnight. */
+  turnsSince(start: number): number {
+    return this.turnLog.filter((t) => t >= start).length;
+  }
+
   close(): void {
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = undefined;
@@ -201,7 +213,7 @@ export class Registry {
   private writeNow(): void {
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     const tmp = `${this.file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify({ version: 1, crates: this.all() }, null, 1));
+    fs.writeFileSync(tmp, JSON.stringify({ version: 1, crates: this.all(), turnLog: this.turnLog }, null, 1));
     fs.renameSync(tmp, this.file);
   }
 }

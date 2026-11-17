@@ -13,6 +13,8 @@ A factory floor for your Claude Code sessions. Each session started in `clean-ro
 
 Only **Archive** removes a crate from the floor.
 
+The 🔕/🔔 button in the top bar turns on a chime when a crate enters the alert bay; if the tab is in the background you also get a desktop notification, and clicking it opens that crate. The top bar also counts finished turns today.
+
 ## Run
 
 ```bash

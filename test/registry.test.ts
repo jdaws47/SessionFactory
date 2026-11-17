@@ -57,6 +57,15 @@ describe('factory terminals started outside the app', () => {
 });
 
 describe('persistence and lifecycle', () => {
+  it('counts finished turns, not pauses on background work, and keeps the count across restarts', () => {
+    reg.ingest(ev({ kind: 'stop', sessionId: 'a' }));
+    reg.ingest(ev({ kind: 'stop', sessionId: 'a', waitingOn: 'shell' }));
+    reg.ingest(ev({ kind: 'stop', sessionId: 'b' }));
+    reg.close();
+    reg = new Registry(FILE, CLEAN_ROOT);
+    expect(reg.turnsSince(0)).toBe(2);
+  });
+
   it('crates survive a restart', () => {
     reg.ingest(ev({ kind: 'prompt', sessionId: 'a', prompt: 'x' }));
     reg.close();
