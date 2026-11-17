@@ -122,8 +122,8 @@ describe('floor placement', () => {
   });
 
   it('storage crates are craned between the top belt and the yard', () => {
-    const pts = travel({ zone: 'dock', slot: 0 }, { zone: 'storage', slot: 4 });
-    const yard = NET.storage.slots[4];
+    const pts = travel({ zone: 'dock', slot: 0 }, { zone: 'storage', slot: 2 });
+    const yard = NET.storage.slots[2];
     expect(yard.kind).toBe('crane');
     if (yard.kind === 'crane') {
       const [pickup, spot] = pts.slice(-2);
@@ -131,7 +131,7 @@ describe('floor placement', () => {
       expect(pickup.crane).toBeUndefined();
       expect(spot).toMatchObject({ ...yard.pos, crane: 'storage' });
     }
-    const out = travel({ zone: 'storage', slot: 4 }, { zone: 'dock', slot: 0 });
+    const out = travel({ zone: 'storage', slot: 2 }, { zone: 'dock', slot: 0 });
     expect(out[1]).toMatchObject({ x: YARD.drop.x, y: YARD.drop.y, crane: 'storage' });
   });
 });
@@ -204,9 +204,14 @@ describe('freight station layout', () => {
 });
 
 describe('storage yard layout', () => {
-  it('centres the yard on its belt and keeps the crane rails clear of the belt legs', () => {
+  it('centres the yard on its belt, keeps spots between the rails and the rails clear of the belt legs', async () => {
     const centre = (YARD.inX + YARD.outX) / 2;
-    expect(YARD.columns[1]).toBe(centre);
+    expect((YARD.columns[0] + YARD.columns[YARD.columns.length - 1]) / 2).toBe(centre);
+    const { CRATE_W } = await import('../web/layout');
+    for (const x of YARD.columns) {
+      expect(x - CRATE_W / 2).toBeGreaterThanOrEqual(YARD.rails.left);
+      expect(x + CRATE_W / 2).toBeLessThanOrEqual(YARD.rails.right);
+    }
     expect((YARD.rails.left + YARD.rails.right) / 2).toBe(centre);
     const beltHalfWidth = 15;
     const railHalfWidth = 4;

@@ -302,15 +302,15 @@ export const FREIGHT = {
 export const YARD = {
   busY: 582,
   /** The yard belt's legs sit symmetrically about the platform centre (1365). */
-  inX: 1489,
-  outX: 1241,
+  inX: 1465,
+  outX: 1265,
   /** One transfer point, the middle of the belt through the yard: crates are picked up and set down here. */
   pickup: { x: 1365, y: 582 },
   drop: { x: 1365, y: 582 },
-  columns: [1239, 1365, 1491],
+  columns: [1302, 1428],
   rows: [662, 740],
   /** Rails stand just outside the belt's legs with a small gap. */
-  rails: { left: 1216, right: 1514, top: 562, bottom: 776 },
+  rails: { left: 1240, right: 1490, top: 562, bottom: 776 },
   /** Where the crane parks between jobs: between the belt and the first row, under the transfer point. */
   home: { x: 1365, y: 622 },
 };
