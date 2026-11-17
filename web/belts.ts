@@ -241,7 +241,7 @@ function hopperLine(): ZoneNet {
   const exitLoopS = LOOP.project(track.pts[track.pts.length - 1]);
   return {
     track,
-    slots: trackSlots(track, [{ x: HOPPER_DROP.x, y: 300 }]),
+    slots: trackSlots(track, [{ x: HOPPER_DROP.x, y: 324 }]),
     entryLoopS: exitLoopS,
     exitLoopS,
     junctions: [corner],
@@ -256,10 +256,10 @@ const TOP_BUS = 220;
 const TOP_ROWS = [148, 292];
 export const MACHINE_COLUMNS = [450, 675, 900, 1125, 1350];
 
-export const HOPPER_DROP: Point = { x: 145, y: 196 };
+export const HOPPER_DROP: Point = { x: 145, y: 220 };
 export const DOCK_FRONT_X = 460;
-export const DOCK_Y = 630;
-export const RECYCLE_Y = 760;
+export const DOCK_Y = 585;
+export const RECYCLE_Y = 715;
 export const DOCK_IN_X = 1120;
 export const DOCK_OUT_X = 350;
 /** Crate width plus a small gap. */
@@ -292,14 +292,14 @@ function dockLine(): ZoneNet {
  * crane lowers crates into the wagon on the tracks below (and lifts them back out).
  */
 export const FREIGHT = {
-  busY: 690,
+  busY: 582,
   /** The out-leg sits as far left as the loop allows; the platform is centred between the legs. */
   inX: 267,
   outX: 113,
-  transfer: { x: 190, y: 690 },
-  wagon: { x: 190, y: 784 },
-  rails: { left: 136, right: 244, top: 670, bottom: 815 },
-  home: { x: 190, y: 737 },
+  transfer: { x: 190, y: 582 },
+  wagon: { x: 190, y: 676 },
+  rails: { left: 136, right: 244, top: 562, bottom: 707 },
+  home: { x: 190, y: 629 },
 };
 
 /** Storage yard: belt along the top, crane field below. */

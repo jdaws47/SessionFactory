@@ -165,6 +165,14 @@ describe('platforms', () => {
     }
   });
 
+  it('line up the edges that face the main loop', async () => {
+    const { AREAS } = await import('../web/layout');
+    const top = [AREAS.intake, AREAS.working].map((a) => Math.round(a.y + a.h));
+    const bottom = [AREAS.freight, AREAS.dock, AREAS.storage].map((a) => Math.round(a.y));
+    expect(new Set(top).size).toBe(1);
+    expect(new Set(bottom).size).toBe(1);
+  });
+
   it('do not overlap each other', async () => {
     const { AREAS } = await import('../web/layout');
     const list = Object.entries(AREAS);

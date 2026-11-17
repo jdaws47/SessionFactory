@@ -40,12 +40,12 @@ export const CRATE_H = 56;
 
 
 /** The hopper's mouth sits just above where new crates land on the intake belt (belts.HOPPER_DROP). */
-export const HOPPER: Rect = { x: 85, y: 88, w: 120, h: 84 };
+export const HOPPER: Rect = { x: 85, y: 112, w: 120, h: 84 };
 export const MACHINE_W = 148;
 export const MACHINE_H = 76;
-export const TRAIN_Y = 796;
+export const TRAIN_Y = 688;
 /** The operator stands between the dock queue and its recycle belt, at the front. */
-export const OPERATOR: Point = { x: 460, y: 700 };
+export const OPERATOR: Point = { x: 460, y: 655 };
 
 export function inRect(p: Point, r: Rect): boolean {
   return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
