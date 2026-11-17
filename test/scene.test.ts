@@ -201,6 +201,50 @@ describe('rerouting on the loop', () => {
   });
 });
 
+describe('cranes set crates down where they stay', () => {
+  it('a crate lowered onto a pile or into the wagon never moves once it is down', () => {
+    const scene = new Scene();
+    const internals = scene as unknown as {
+      sprites: Map<string, Sprite & { stage?: string }>;
+      cranes: Record<string, { holding: string | null }>;
+      gantry: { holding: string | null };
+      pileOffset(s: unknown): { x: number; y: number };
+    };
+    const cap = NET.storage.slots.length;
+    const full = Array.from({ length: cap }, (_, i) => crate(`s${i}`, 'storage', i));
+    const movers = ['A', 'B', 'C'].map((id, i) => crate(id, 'dock', 10 + i));
+    scene.setCrates([...full, ...movers], 1000);
+    step(scene, 10);
+    const drawn = new Map<string, { x: number; y: number; resting: boolean }>();
+    let worst = 0;
+    const watch = (seconds: number) => {
+      for (let t = 0; t < seconds; t += 1 / 60) {
+        scene.update(1 / 60);
+        const held = [...Object.values(internals.cranes), internals.gantry].map((c) => c.holding);
+        for (const [id, s] of internals.sprites) {
+          // Once a crate has been set down (not on a belt, not on a crane, train standing), it must not move at all.
+          const resting = !s.path.length && !s.next && !held.includes(id) && !scene.train.moving;
+          const at = { ...(s.stage ? { x: s.x, y: s.y } : internals.pileOffset(s)), resting };
+          const before = drawn.get(id);
+          if (before?.resting && resting) worst = Math.max(worst, Math.hypot(at.x - before.x, at.y - before.y));
+          drawn.set(id, at);
+        }
+      }
+    };
+    // Three crates pile up in storage one after another, then the top two are archived into the wagon together.
+    let now = movers;
+    for (const [i, c] of movers.entries()) {
+      now = now.map((m) => (m.id === c.id ? { ...m, zone: 'storage' as const, zoneSince: 100 + i } : m));
+      scene.setCrates([...full, ...now], 2000 + i);
+      watch(40);
+    }
+    scene.setCrates([...full, ...now.map((m, i) => (i > 0 ? { ...m, archived: true, archivedAt: 3000 + i } : m))], 3000);
+    watch(90);
+    expect([...internals.sprites.values()].filter((s) => s.stage).length).toBe(2);
+    expect(worst).toBeLessThan(0.5);
+  });
+});
+
 describe('piles', () => {
   type Internals = { sprites: Map<string, { at: { slot: number }; pileRank: number }>; drawOrder(): [string, unknown][]; pileOffset(s: unknown): { x: number; y: number } };
   const internals = (scene: Scene) => scene as unknown as Internals;

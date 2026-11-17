@@ -61,6 +61,8 @@ interface Sprite {
   pileSize: number;
   /** Order in which it came to rest where it is (undefined while moving): piles stack by it, last in on top. */
   settled?: number;
+  /** Pile level a crate lowered by crane onto a factory pile lands at (set while the crane carries it). */
+  dropLift?: number;
   /** Height in its pile as drawn (levels), easing towards its place so a crate is lifted onto the pile, not teleported. */
   lift?: number;
   /** Seconds spent waiting for the way to clear; past PATIENCE the crate eases through rather than gridlock. */
@@ -232,7 +234,7 @@ export class Scene {
       const piles = new Map<number, CrateView[]>();
       for (const c of list) piles.set(assigned.get(c.id)!, [...(piles.get(assigned.get(c.id)!) ?? []), c]);
       for (const [slot, pile] of piles) {
-        pile.sort((a, b) => this.stackingOrder(b) - this.stackingOrder(a) || b.zoneSince - a.zoneSince);
+        pile.sort((a, b) => this.stackingOrder(b, { zone, slot }) - this.stackingOrder(a, { zone, slot }) || b.zoneSince - a.zoneSince);
         pile.forEach((c, rank) => this.place(c, { zone, slot }, first, rank, pile.length, loopers.has(c.id)));
         // On the first layout everything is already in place: the pile's arrival order is its stacking order.
         if (first) for (const c of [...pile].reverse()) this.sprites.get(c.id)!.settled = ++this.arrivals;
@@ -364,10 +366,36 @@ export class Scene {
   }
 
   /** Sends a sprite to a slot along the belts, after finishing the trip it is already on. */
+  /**
+   * Where a crane should set a crate down: on top of whatever is already there, so it lands where it will stay.
+   * Wagon crates get their place in the wagon now; crates for a factory pile are lowered onto its top.
+   */
+  private dropPoint(id: string, s: Sprite, p: Point, intoWagon: boolean): Point {
+    if (intoWagon) {
+      if (s.wagonSlot === undefined) s.wagonSlot = this.nextWagonSlot(id);
+      return this.train.wagonSpot(s.wagonSlot);
+    }
+    const spot = NET[s.at.zone].slots[s.at.slot];
+    if (s.path.length !== 1 || spot.pos.x !== p.x || spot.pos.y !== p.y) return p;
+    const below = [...this.sprites.entries()].filter(([oid, o]) => oid !== id && !o.stage && !o.leaving && !o.path.length && !o.next && o.at.zone === s.at.zone && o.at.slot === s.at.slot).length;
+    const k = Math.min(below, 3);
+    s.dropLift = k;
+    return { x: p.x - k * 6, y: p.y - k * 6 };
+  }
+
+  /** The lowest wagon place not taken by a crate in the wagon or one on its way into it. */
+  private nextWagonSlot(id: string): number {
+    const taken = new Set([...this.sprites.entries()].filter(([oid, o]) => oid !== id && o.wagonSlot !== undefined).map(([, o]) => o.wagonSlot));
+    let n = 0;
+    while (taken.has(n)) n++;
+    return n;
+  }
+
   /** Where a crate goes in its pile: crates at rest by when they arrived, anything still on its way on top. */
-  private stackingOrder(c: CrateView): number {
+  private stackingOrder(c: CrateView, pile: SlotRef): number {
     const s = this.sprites.get(c.id);
-    return !s || s.path.length || s.next || this.heldBy(c.id) ? Infinity : (s.settled ?? Infinity);
+    const here = s && s.at.zone === pile.zone && s.at.slot === pile.slot;
+    return !here || s.path.length || s.next || this.heldBy(c.id) ? Infinity : (s.settled ?? Infinity);
   }
 
   /** Re-stacks the pile at a spot after a crate comes to rest in it, so the newest arrival is on top. */
@@ -426,6 +454,8 @@ export class Scene {
     const onward = hop && into.kind === 'crane' ? onwardFrom(s.currentTo.zone, into.pickupS, to) : [];
     if (hop && into.kind === 'crane' && hop.x === into.pos.x && hop.y === into.pos.y && joins(s, s.path.slice(0, craneAt), onward) && this.craneFor(s.currentTo.zone).cancel(this.idOf(s))) {
       s.path = [...s.path.slice(0, craneAt), ...onward];
+      s.dropLift = undefined;
+      if (!s.stage) s.wagonSlot = undefined;
       s.next = undefined;
       s.currentTo = to;
       s.at = to;
@@ -556,7 +586,7 @@ export class Scene {
           // Wait (belt stopped) until the crane comes over, picks the crate up and sets it down. Crates for the
           // wagon also wait for the train to be at the freight station.
           const intoWagon = p.crane === 'freight' && p.x === FREIGHT.wagon.x && p.y === FREIGHT.wagon.y;
-          if (!intoWagon || this.train.atFactory) this.craneFor(p.crane).request(id, p);
+          if (!intoWagon || this.train.atFactory) this.craneFor(p.crane).request(id, this.dropPoint(id, s, p, intoWagon));
           break;
         }
         const dx = p.x - s.x;
@@ -599,10 +629,17 @@ export class Scene {
       },
       done: (id: string) => {
         const s = this.sprites.get(id);
+        if (s?.dropLift !== undefined && s.path[0]) {
+          // Set down on top of a pile: it rests at the pile's spot, drawn at the height it was lowered to.
+          Object.assign(s, { x: s.path[0].x, y: s.path[0].y, lift: s.dropLift, dropLift: undefined });
+        }
         if (s?.path[0]?.crane) s.path.shift();
       },
-      free: (at: Point, except: string) => {
-        const mine = this.sprites.get(except)?.at;
+      free: (to: Point, except: string) => {
+        const me = this.sprites.get(except);
+        const mine = me?.at;
+        // A crate lowered onto a pile aims at the pile's top; what has to be clear is the pile's own spot.
+        const at = me?.dropLift !== undefined && me.path[0] ? me.path[0] : to;
         return ![...this.sprites.entries()].some(([oid, o]) => {
           if (oid === except || this.heldBy(oid) || o.loading !== undefined || o.stage) return false;
           // Crates already stacked in the same pile spot don't stop the crane adding another.
@@ -710,7 +747,8 @@ export class Scene {
       for (const [id, s] of this.sprites) {
         if (s.stage !== 'yard' || !s.returning || this.gantryJobs.has(id)) continue;
         this.gantryJobs.set(id, 'fetch');
-        this.gantry.request(id, train.wagonSpot(train.cargo.length + [...this.gantryJobs.values()].filter((j) => j === 'fetch').length - 1));
+        if (s.wagonSlot === undefined) s.wagonSlot = this.nextWagonSlot(id);
+        this.gantry.request(id, train.wagonSpot(s.wagonSlot));
       }
       if (!this.gantry.busy && !this.gantryJobs.size) {
         // Crates coming home, or archived crates waiting at the freight station, call it back; otherwise an idle
