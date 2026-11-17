@@ -276,8 +276,8 @@ export const YARD = {
   columns: [1244, 1370, 1496],
   rows: [656, 734, 812],
   rails: { left: 1172, right: 1558, top: 552, bottom: 852 },
-  /** Where the crane parks between jobs: top-right corner, above the belt and clear of the crates' names. */
-  home: { x: 1530, y: 552 },
+  /** Where the crane parks between jobs: between the belt and the first row, under the transfer point. */
+  home: { x: 1360, y: 607 },
 };
 
 function craneYard(track: Track): CraneSlot[] {
