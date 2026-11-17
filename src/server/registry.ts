@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { Crate, CrateView, JiraInfo } from '../shared/types';
 import type { FactoryEvent } from './events';
 import { DEFAULT_JIRA_PROJECTS, isWithin, refreshLabel, repoOf } from './labels';
-import { applyEvent, newCrate } from './machine';
+import { applyEvent, isSyntheticPrompt, newCrate } from './machine';
 
 export const READY_TO_SHIP_AFTER_MS = 3 * 24 * 3600 * 1000;
 /** A /clear ends one session id and starts the next in the same process within moments. */
@@ -28,7 +28,13 @@ export class Registry {
   ) {
     if (fs.existsSync(file)) {
       const saved = JSON.parse(fs.readFileSync(file, 'utf8')) as { crates: Crate[]; turnLog?: number[] };
-      for (const c of saved.crates) this.crates.set(c.id, c);
+      for (const c of saved.crates) {
+        if (isSyntheticPrompt(c.firstPrompt)) {
+          c.firstPrompt = undefined;
+          refreshLabel(c, this.jiraProjects);
+        }
+        this.crates.set(c.id, c);
+      }
       this.turnLog = saved.turnLog ?? [];
     }
   }

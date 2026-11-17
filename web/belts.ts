@@ -1,8 +1,9 @@
 import type { Area, Point } from './layout';
 import { AREAS } from './layout';
+import { squircleCorner } from './shapes';
 
 /** Crates and belt slats move at the same speed so items look carried. */
-export const BELT_SPEED = 110;
+export const BELT_SPEED = 200;
 export const LANE_TOP = 415;
 export const LANE_BOTTOM = 465;
 const R = (LANE_BOTTOM - LANE_TOP) / 2;
@@ -60,13 +61,7 @@ export class Track {
   }
 }
 
-function arc(cx: number, cy: number, r: number, fromDeg: number, toDeg: number): Point[] {
-  const steps = Math.max(6, Math.ceil((Math.abs(toDeg - fromDeg) / 90) * 10));
-  return Array.from({ length: steps + 1 }, (_, i) => {
-    const a = ((fromDeg + ((toDeg - fromDeg) * i) / steps) * Math.PI) / 180;
-    return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
-  });
-}
+const arc = squircleCorner;
 
 /** The main loop runs clockwise: top lane flows right, bottom lane flows left. */
 export const LOOP = new Track(

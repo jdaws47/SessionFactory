@@ -1,7 +1,7 @@
 import type { CrateView, FactoryState, JiraTicket } from '../src/shared/types';
 import { AlertNotifier } from './alerts';
 import { get, post } from './api';
-import { repoColor } from './scene';
+import { crateColor } from './scene';
 import { AttachedTerminal } from './terminal';
 
 export interface Action {
@@ -144,7 +144,7 @@ export class Ui {
     const since = ago(this.state.now - c.zoneSince).replace(' ago', '');
     this.tooltip.innerHTML = `
       <div class="tt-title">${esc(c.label)}</div>
-      <div class="tt-row"><span class="dot" style="background:${repoColor(c.repo)}"></span>${esc(c.repo)}${c.jiraKey ? ` · ${esc(c.jiraKey)}` : ''}</div>
+      ${c.jiraKey && c.jiraKey !== c.label ? `<div class="tt-row">${esc(c.jiraKey)}</div>` : ''}
       <div class="tt-row">${esc(ZONE_NAMES[c.zone])}${c.alertReason ? ` (${esc(c.alertReason)})` : ''} · ${esc(since)}</div>
       ${c.waitingOn ? `<div class="tt-row dim">waiting on ${esc(c.waitingOn)}</div>` : c.lastTool ? `<div class="tt-row dim">last tool: ${esc(c.lastTool)}</div>` : ''}
       ${c.readyToShip ? `<div class="tt-row ship">ready to ship: ${esc(c.readyToShip)}</div>` : ''}
@@ -277,7 +277,7 @@ export class Ui {
           },
         ];
     const meta = [
-      `${ZONE_NAMES[c.zone]}${c.alertReason ? `: ${c.alertReason}` : ''} for ${ago(s.now - c.zoneSince).replace(' ago', '')}`,
+      `${c.alertReason ? `${c.alertReason}, ` : ''}for ${ago(s.now - c.zoneSince).replace(' ago', '')}`,
       c.waitingOn ? `waiting on ${c.waitingOn}` : c.lastTool ? `last tool ${c.lastTool}` : '',
       `${c.turns} turn${c.turns === 1 ? '' : 's'}`,
     ].filter(Boolean);
@@ -289,11 +289,11 @@ export class Ui {
 
     return `
       <div class="cw-title">
-        <span class="dot big" style="background:${repoColor(c.repo)}"></span>
+        <span class="dot big" style="background:${crateColor(c.id)}"></span>
         <div class="cw-name">
           <div class="cw-label" title="Rename" ${rename}>${esc(c.label)} <span class="pencil">✎</span></div>
           <div class="cw-meta">
-            <span class="chip zone-${c.zone}">${esc(c.repo)}</span>
+            <span class="chip zone-${c.zone}">${esc(ZONE_NAMES[c.zone])}</span>
             ${c.jiraKey ? this.jiraChip(c, s) : ''}
             ${c.readyToShip ? `<span class="chip ship">ready to ship · ${esc(c.readyToShip)}</span>` : ''}
             <span class="dim">${esc(meta.join(' · '))}</span>
@@ -319,7 +319,7 @@ export class Ui {
       <dl class="cw-details">
         <dt>Started</dt><dd>${esc(new Date(c.startedAt).toLocaleString())}</dd>
         <dt>Session</dt><dd><code>${esc(lastSessionId(c) ?? 'not started yet')}</code></dd>
-        <dt>Directory</dt><dd><code>${esc(c.cwd)}</code></dd>
+        <dt>Started in</dt><dd><code>${esc(c.cwd)}</code></dd>
       </dl>`;
     if (c.slot && c.zone !== 'storage' && !lastSessionId(c) && s.now - c.startedAt < 20_000) {
       return `<div class="cw-empty"><div class="spinner"></div><h3>Starting the terminal…</h3><p>Running scrub-in, then claude.</p></div>`;
@@ -445,7 +445,7 @@ export class Ui {
     const q = this.warehouseQuery.trim().toLowerCase();
     const archived = s.crates
       .filter((c) => c.archived)
-      .filter((c) => !q || [c.label, c.repo, c.jiraKey, c.firstPrompt, c.lastMessage, new Date(c.archivedAt ?? 0).toLocaleDateString()].some((f) => f?.toLowerCase().includes(q)))
+      .filter((c) => !q || [c.label, c.jiraKey, c.firstPrompt, c.lastMessage, new Date(c.archivedAt ?? 0).toLocaleDateString()].some((f) => f?.toLowerCase().includes(q)))
       .sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0));
     const groups = new Map<string, CrateView[]>();
     for (const c of archived) groups.set(c.label, [...(groups.get(c.label) ?? []), c]);
@@ -476,7 +476,7 @@ export class Ui {
       <div class="wh-inner">
         <header>
           <h2>WAREHOUSE</h2>
-          <input id="wh-search" placeholder="Search name, ticket, repo, date…" value="${esc(this.warehouseQuery)}" />
+          <input id="wh-search" placeholder="Search name, ticket, date…" value="${esc(this.warehouseQuery)}" />
           <button class="icon" ${this.act(() => this.closeWarehouse())} title="Close">✕</button>
         </header>
         ${shelves || `<p class="empty">${q ? 'Nothing matches that search.' : 'Nothing archived yet. Archive a crate from its window and it ships here.'}</p>`}
@@ -500,8 +500,8 @@ export class Ui {
         : [{ label: 'Copy resume cmd', run: () => this.copy(resumeCommand(c, s.cleanRoot), 'Resume command') }]),
     ];
     return `<article class="wh-card ${c.returned ? 'returned' : ''}">
-      <div class="wh-top"><span class="dot" style="background:${repoColor(c.repo)}"></span>${esc(c.repo)}
-        <span class="dim">· archived ${esc(new Date(c.archivedAt ?? 0).toLocaleDateString())}</span>
+      <div class="wh-top"><span class="dot" style="background:${crateColor(c.id)}"></span>
+        <span class="dim">archived ${esc(new Date(c.archivedAt ?? 0).toLocaleDateString())}</span>
         ${c.archiveCount > 1 || c.reactivationCount ? `<span class="dim">· round ${c.archiveCount}</span>` : ''}
         ${c.jiraKey && c.jiraKey !== c.label ? `<span class="dim">· ${esc(c.jiraKey)}</span>` : ''}
       </div>

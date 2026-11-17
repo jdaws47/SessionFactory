@@ -123,6 +123,12 @@ describe('labels', () => {
     expect(crate.jiraKey).toBe('TF-735');
   });
 
+  it('ignores prompts Claude Code injects itself, like background task notifications', () => {
+    const crate = run({ kind: 'prompt', prompt: '<task-notification>\n<task-id>x</task-id>' }, { kind: 'prompt', prompt: 'fix flaky tests' });
+    expect(crate.firstPrompt).toBe('fix flaky tests');
+    expect(crate.zone).toBe('working');
+  });
+
   it('uses the workspace root name for sessions started at the root', () => {
     const crate = run({ kind: 'start', cwd: CLEAN_ROOT });
     expect(crate.repo).toBe('clean-room');

@@ -23,8 +23,8 @@ export interface AreaDef extends Rect {
 
 export const W = 1600;
 export const H = 900;
-export const CRATE_W = 62;
-export const CRATE_H = 44;
+export const CRATE_W = 118;
+export const CRATE_H = 56;
 
 export const AREAS: Record<Area, AreaDef> = {
   intake: { x: 30, y: 36, w: 230, h: 334, port: 145, title: 'INTAKE', subtitle: 'new sessions' },
@@ -65,17 +65,17 @@ export const OPERATOR: Point = { x: AREAS.dock.x + 62, y: AREAS.dock.y + 120 };
 export function slotPosition(zone: Zone, i: number, count: number): Point {
   switch (zone) {
     case 'intake':
-      return grid(AREAS.intake, i, 2, 92, 66, 150);
+      return grid(AREAS.intake, i, 1, 130, 78, 146);
     case 'working': {
       const m = machineRects(count)[i];
       return { x: m.x + m.w / 2, y: m.y + m.h / 2 + 10 };
     }
     case 'alert':
-      return grid(AREAS.alert, i, 4, 96, 88, 56);
+      return grid(AREAS.alert, i, 3, 132, 98, 60);
     case 'dock':
-      return { x: AREAS.dock.x + 150 + (i % 9) * 78, y: OPERATOR.y + Math.floor(i / 9) * 92 };
+      return { x: AREAS.dock.x + 180 + (i % 5) * 134, y: OPERATOR.y + Math.floor(i / 5) * 96 };
     case 'storage':
-      return grid(AREAS.storage, i, 4, 96, 80, 56);
+      return grid(AREAS.storage, i, 3, 132, 86, 56);
   }
 }
 

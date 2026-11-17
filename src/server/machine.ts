@@ -3,6 +3,11 @@ import type { FactoryEvent } from './events';
 import { refreshLabel, repoOf, snippet } from './labels';
 
 const QUESTION_TOOLS: Record<string, string> = { AskUserQuestion: 'question', ExitPlanMode: 'plan approval' };
+/** Prompts Claude Code injects itself (background task results etc.), not typed by the user. */
+export function isSyntheticPrompt(prompt: string | undefined): boolean {
+  return !!prompt && /^\s*<[a-z][\w-]*[\s>]/.test(prompt);
+}
+
 const INPUT_NOTIFICATIONS = new Set(['elicitation_dialog', 'elicitation_url_dialog', 'agent_needs_input']);
 
 export function newCrate(ev: FactoryEvent, cleanRoot: string, id: string): Crate {
@@ -50,7 +55,7 @@ export function applyEvent(crate: Crate, ev: FactoryEvent, jiraProjects?: string
     case 'prompt': {
       next.endedAt = undefined;
       if (ev.title) next.title = ev.title;
-      const prompt = ev.prompt ? snippet(ev.prompt, 400) : undefined;
+      const prompt = ev.prompt && !isSyntheticPrompt(ev.prompt) ? snippet(ev.prompt, 400) : undefined;
       if (prompt && !next.firstPrompt) next.firstPrompt = prompt;
       if (prompt) next.lastPrompt = prompt;
       moveTo('working');

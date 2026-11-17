@@ -15,6 +15,7 @@
 
 * {
   box-sizing: border-box;
+  corner-shape: squircle;
 }
 
 html,
@@ -63,7 +64,7 @@ code {
 .logo {
   width: 22px;
   height: 18px;
-  border-radius: 3px;
+  border-radius: 6px;
   background: var(--orange);
   box-shadow: inset 0 0 0 3px #a3530f;
 }
@@ -98,7 +99,7 @@ code {
 .conn {
   width: 10px;
   height: 10px;
-  border-radius: 50%;
+  border-radius: 32%;
   background: var(--red);
 }
 
@@ -123,7 +124,7 @@ code {
   font-size: 13px;
   font-weight: 600;
   padding: 6px 12px;
-  border-radius: 6px;
+  border-radius: 10px;
   border: 1px solid var(--edge);
   background: var(--panel-2);
   color: var(--text);
@@ -181,7 +182,7 @@ textarea {
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--edge);
-  border-radius: 6px;
+  border-radius: 10px;
   padding: 6px 10px;
   min-width: 0;
 }
@@ -211,7 +212,7 @@ textarea:focus {
   background: var(--panel);
   border: 1px solid var(--edge);
   border-top: 4px solid var(--orange);
-  border-radius: 14px;
+  border-radius: 22px;
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
   overflow: hidden;
 }
@@ -246,7 +247,7 @@ textarea:focus {
 .dot.big {
   width: 16px;
   height: 16px;
-  border-radius: 5px;
+  border-radius: 8px;
 }
 
 .cw-name {
@@ -346,7 +347,7 @@ textarea:focus {
   width: 34px;
   height: 34px;
   margin: 0 auto 12px;
-  border-radius: 50%;
+  border-radius: 32%;
   border: 4px solid var(--edge);
   border-top-color: var(--orange);
   animation: spin 0.9s linear infinite;
@@ -372,7 +373,7 @@ textarea:focus {
   background: var(--panel);
   border: 1px solid var(--edge);
   border-top: 4px solid var(--orange);
-  border-radius: 14px;
+  border-radius: 22px;
   padding: 16px 18px;
   display: flex;
   flex-direction: column;
@@ -413,7 +414,7 @@ textarea:focus {
   z-index: 30;
   background: #0b0c0e;
   border: 1px solid var(--edge);
-  border-radius: 6px;
+  border-radius: 10px;
   padding: 8px 10px;
   max-width: 300px;
   font-size: 12px;
@@ -436,7 +437,7 @@ textarea:focus {
   display: inline-block;
   width: 9px;
   height: 9px;
-  border-radius: 2px;
+  border-radius: 6px;
   flex: none;
 }
 
@@ -448,7 +449,7 @@ textarea:focus {
   background: var(--panel);
   border: 1px solid var(--edge);
   border-top: 3px solid var(--blue);
-  border-radius: 8px;
+  border-radius: 13px;
   padding: 4px 12px 10px;
   z-index: 5;
 }
@@ -522,7 +523,7 @@ textarea:focus {
 .wh-card {
   background: var(--panel);
   border: 1px solid var(--edge);
-  border-radius: 8px;
+  border-radius: 13px;
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
@@ -564,7 +565,7 @@ textarea:focus {
   background: #0b0c0e;
   border: 1px solid var(--orange);
   padding: 8px 16px;
-  border-radius: 6px;
+  border-radius: 10px;
   z-index: 40;
   pointer-events: none;
 }
@@ -636,7 +637,7 @@ textarea:focus {
   justify-content: space-between;
   padding: 8px 10px;
   border: 1px solid var(--edge);
-  border-radius: 10px;
+  border-radius: 16px;
   background: var(--panel-2);
 }
 
@@ -675,4 +676,52 @@ textarea:focus {
 
 .icon.bell.on {
   opacity: 1;
+}
+
+.chip {
+  font-size: 12px;
+  padding: 2px 9px;
+  border-radius: 10px;
+  border: 1px solid var(--edge);
+  white-space: nowrap;
+}
+
+.chip.zone-alert {
+  border-color: var(--red);
+  color: #fca5a5;
+}
+
+.chip.zone-working {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.chip.zone-dock {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+.chip.ship,
+.tt-row.ship {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+.quote {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--bg);
+  border-left: 3px solid var(--edge);
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+}
+
+#inbox h4 {
+  margin: 12px 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--dim);
 }
