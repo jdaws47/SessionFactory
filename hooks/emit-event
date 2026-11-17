@@ -16,6 +16,11 @@
     [[ -z "$pid" || "$pid" -le 1 ]] && break
   done
 
+  # Headless runs (claude -p / --print, e.g. scrub-in's /init) are not sessions you work in: record nothing.
+  if [[ -n "$claude_pid" ]] && tr '\0' '\n' < "/proc/$claude_pid/cmdline" 2>/dev/null | grep -qxE -- '-p|--print'; then
+    exit 0
+  fi
+
   at=$(date +%s%3N)
   name="$at-$$-$RANDOM"
   slot="${SF_SLOT//[^A-Za-z0-9_-]/}"

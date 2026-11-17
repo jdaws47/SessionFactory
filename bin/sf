@@ -15,7 +15,7 @@ unset TMUX
 case "${1:-new}" in
   new)
     slot="sf-$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n')"
-    "${tmux_cmd[@]}" new-session -d -s "$slot" -c "$clean_room" -e "SF_SLOT=$slot"
+    "${tmux_cmd[@]}" new-session -d -s "$slot" -c "$clean_room" -e "SF_SLOT=$slot" -e CLAUDE_CODE_AUTO_CONNECT_IDE=false
     "${tmux_cmd[@]}" send-keys -t "$slot" -l "scrub-in; cd '$clean_room' && claude; exit"
     "${tmux_cmd[@]}" send-keys -t "$slot" Enter
     exec "${tmux_cmd[@]}" attach-session -t "$slot"

@@ -56,6 +56,30 @@ describe('emit-event hook', () => {
     expect(normalize(written)?.kind).toBe('stop');
   });
 
+  it('records nothing for headless claude -p runs, but still records interactive ones', () => {
+    const root = path.join(import.meta.dirname, '.tmp', 'hook-headless');
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.mkdirSync(path.join(root, 'hooks'), { recursive: true });
+    fs.copyFileSync(HOOK, path.join(root, 'hooks', 'emit-event'));
+    fs.chmodSync(path.join(root, 'hooks', 'emit-event'), 0o755);
+    // A stand-in "claude" process: bash under that name (bash's own -p is harmless privileged mode).
+    const claude = path.join(root, 'claude');
+    fs.copyFileSync(execFileSync('bash', ['-c', 'command -v bash']).toString().trim(), claude);
+    fs.chmodSync(claude, 0o755);
+    const input = JSON.stringify({ session_id: 'abc', cwd: '/x', hook_event_name: 'SessionStart' });
+    fs.writeFileSync(path.join(root, 'input.json'), input);
+    const run = `"${path.join(root, 'hooks', 'emit-event')}" < "${path.join(root, 'input.json')}"; true`;
+    const events = () => (fs.existsSync(path.join(root, 'data', 'events')) ? fs.readdirSync(path.join(root, 'data', 'events')) : []);
+
+    expect(execFileSync(claude, ['-p', '-c', run]).toString()).toBe('');
+    expect(events()).toHaveLength(0);
+
+    execFileSync(claude, ['-c', run]);
+    expect(events()).toHaveLength(1);
+    const written = JSON.parse(fs.readFileSync(path.join(root, 'data', 'events', events()[0]), 'utf8'));
+    expect(written.sf.pid).toBeGreaterThan(1);
+  });
+
   it('still exits 0 when it cannot write', () => {
     const root = path.join(import.meta.dirname, '.tmp', 'hook-ro');
     fs.rmSync(root, { recursive: true, force: true });

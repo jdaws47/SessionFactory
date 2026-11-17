@@ -79,7 +79,7 @@ export class Terminals {
   }
 
   async start(slot: string, command: string): Promise<void> {
-    await this.tmux(['new-session', '-d', '-s', slot, '-x', '200', '-y', '50', '-c', this.cleanRoot, '-e', `SF_SLOT=${slot}`]);
+    await this.tmux(['new-session', '-d', '-s', slot, '-x', '200', '-y', '50', '-c', this.cleanRoot, '-e', `SF_SLOT=${slot}`, '-e', 'CLAUDE_CODE_AUTO_CONNECT_IDE=false']);
     await this.tmux(['send-keys', '-t', slot, '-l', command]);
     await this.tmux(['send-keys', '-t', slot, 'Enter']);
     await this.refresh();
