@@ -36,7 +36,7 @@ function toFloor(e: MouseEvent): Point {
 canvas.addEventListener('mousemove', (e) => {
   const p = toFloor(e);
   hover = scene.hit(p);
-  const overTarget = hover || inRect(p, AREAS.freight) || (state?.features.terminals && inRect(p, HOPPER));
+  const overTarget = hover || scene.onTrain(p) || inRect(p, AREAS.freight) || (state?.features.terminals && inRect(p, HOPPER));
   canvas.style.cursor = overTarget ? 'pointer' : 'default';
   ui.showTooltip(hover ? (state?.crates.find((c) => c.id === hover) ?? null) : null, e.clientX, e.clientY);
 });
@@ -51,6 +51,8 @@ canvas.addEventListener('click', (e) => {
   const id = scene.hit(p);
   if (id && state?.crates.find((c) => c.id === id)?.archived) ui.openStack(scene.stackOf(id), e.clientX, e.clientY);
   else if (id) ui.select(id);
+  // The train takes you across in either direction; the freight station leads to the warehouse.
+  else if (scene.onTrain(p)) (scene.onWarehouse ? ui.showFactory() : ui.openWarehouse());
   else if (inRect(p, AREAS.freight)) ui.openWarehouse();
   else if (state?.features.terminals && inRect(p, HOPPER)) ui.openNewSession();
   else ui.select(null);

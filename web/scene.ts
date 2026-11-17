@@ -260,6 +260,12 @@ export class Scene {
     this.camTarget = where === 'factory' ? 0 : WAREHOUSE_X;
   }
 
+  /** Whether a point (world coordinates) is on the train, wherever it is. */
+  onTrain(p: Point): boolean {
+    const x = this.train.x;
+    return p.x > x - 90 && p.x < x + 90 && p.y > TRAIN_Y - 36 && p.y < TRAIN_Y + 32;
+  }
+
   get onWarehouse(): boolean {
     return this.camTarget === WAREHOUSE_X;
   }
