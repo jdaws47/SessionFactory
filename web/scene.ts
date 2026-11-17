@@ -767,23 +767,28 @@ function paintScenery(g: CanvasRenderingContext2D): void {
       const q = t.at(t.project(p));
       return Math.hypot(q.x - p.x, q.y - p.y) > 22;
     });
-  const clear = (p: Point) => p.y > 8 && !areas.some((a) => p.x > a.x - 6 && p.x < a.x + a.w + 6 && p.y > a.y - 6 && p.y < a.y + a.h + 6) && offBelts(p);
+  const clear = (p: Point) => p.y > 8 && !areas.some((a) => p.x > a.x && p.x < a.x + a.w && p.y > a.y && p.y < a.y + a.h) && offBelts(p);
+  const plants: Point[] = [];
   for (let i = 0; i < 2400; i++) {
     const p = { x: rnd() * W, y: rnd() * H };
     const plantNext = rnd() < 0.55;
     if (!clear(p)) continue;
-    if (!plantNext) {
-      const w = 5 + rnd() * 9;
-      const h = 4 + rnd() * 5;
-      squirclePath(g, p.x - w / 2, p.y - h / 2, w, h, Math.min(w, h) * 0.3);
-      g.fillStyle = C.rock;
-      g.fill();
-    } else {
-      plant(g, p.x, p.y, rnd);
+    if (plantNext) {
+      plants.push(p);
+      continue;
     }
+    const w = 5 + rnd() * 9;
+    const h = 4 + rnd() * 5;
+    squirclePath(g, p.x - w / 2, p.y - h / 2, w, h, Math.min(w, h) * 0.3);
+    g.fillStyle = C.rock;
+    g.fill();
   }
 
+  // Ground level first (rocks, platforms), then plants, which stand taller than the platforms they overhang.
+  // Belts are drawn later, above everything here.
   for (const [key, a] of Object.entries(AREAS) as [Area, (typeof AREAS)[Area]][]) foundation(g, key, a);
+  const plantRnd = seeded(11);
+  for (const p of plants) plant(g, p.x, p.y, plantRnd);
 
   g.fillStyle = '#3d3226';
   const rail = AREAS.freight;
