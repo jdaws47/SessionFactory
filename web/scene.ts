@@ -1425,7 +1425,9 @@ function foundation(g: CanvasRenderingContext2D, key: Area | 'warehouse', a: (ty
 
   g.font = '800 13px system-ui, sans-serif';
   const tw = g.measureText(a.title).width;
-  const left = a.w < 250 ? a.x + (a.w - tw - 20) / 2 : a.x + (TITLE_INSET[key] ?? 16);
+  // Narrow platforms with belt legs at both sides (intake, freight) centre their title between them.
+  const centred = a.w < 250 || key === 'freight';
+  const left = centred ? a.x + (a.w - tw - 20) / 2 : a.x + (TITLE_INSET[key] ?? 16);
   fillSquircle(g, left, a.y + 12, tw + 20, 24, RADIUS.small, C.orange);
   g.fillStyle = '#1a1208';
   g.textAlign = 'left';
