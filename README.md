@@ -44,9 +44,13 @@ If the server starts in a shell that has run `scrub-in` (so the `JIRA_*` variabl
 - A ticket that's resolved puts a **SHIP?** tag on its crate. It never archives anything.
 - An archived crate whose ticket moves (reopened, back in progress…) lights up in the Warehouse and the "Returned" inbox. You decide whether to bring it back.
 
+## Older sessions
+
+On startup the server reads `~/.claude/projects` and puts every past session that ran inside clean-room into the Warehouse as an archived crate, named by its session name or Jira key, so you can resume it. Use **Import older sessions** in the Warehouse to rescan. It keeps only metadata (session id, name, dates, directory, Jira key); conversation text is never stored. Sessions active in the last 30 minutes are left to the hooks.
+
 ## How it sees your sessions
 
-Observe-only hooks in `clean-room/.claude/settings.local.json` run `hooks/emit-event`. The script writes each hook event into `data/events/` and exits 0 without printing anything. The app reads nothing outside `clean-room/`.
+Observe-only hooks in `clean-room/.claude/settings.local.json` run `hooks/emit-event`. The script writes each hook event into `data/events/` and exits 0 without printing anything. Apart from reading `~/.claude/projects` for older sessions, the app reads and writes nothing outside `clean-room/`.
 
 ```bash
 npm run hooks -- status

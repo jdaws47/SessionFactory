@@ -46,6 +46,7 @@ src/server/
   labels.ts           Repo, Jira-key and label derivation; clean-room boundary check
   registry.ts         Persistent crate store (data/registry.json), session linking, archive, liveness
   ingest.ts           Drains data/events/ into the registry (fs.watch + polling)
+  history.ts          Imports metadata of past clean-room sessions from ~/.claude/projects as archived crates
   jira.ts             Read-only Jira via the vida-jira CLI (assigned tickets, statuses); never writes
   terminals.ts        tmux bridge: start/kill factory terminals, attach via node-pty; claudeCommand() builds the scrub-in line
   http.ts             Localhost-only HTTP + websocket server (Host/Origin checked)
@@ -84,7 +85,7 @@ npx vitest run test/machine.test.ts
 
 ## Engineering Principles
 
-- **Everything stays inside clean-room.** Never read `~/.claude` (no session files, no transcripts), `~/.bash_aliases`, or any other path outside `clean-room/`. Hook payloads carry `transcript_path`; it is dropped in `events.ts` and must never be used.
+- **Everything stays inside clean-room, except reading `~/.claude`.** `~/.claude` may be read when needed (e.g. `history.ts` imports metadata of past sessions) but never written. Nothing else outside `clean-room/` is read or written (`~/.bash_aliases` included). Imports keep metadata only, never conversation text.
 - **Only Archive takes a crate off the floor.** Process exit, timeouts and Jira status only move a crate to Storage or add a "ready to ship" hint. Nothing deletes crates.
 - **The hooks are observe-only.** `emit-event` must never print, never exit non-zero, and never make a decision.
 - **Never touch other Claude config.** The only allowed config change is the `hooks` key in `clean-room/.claude/settings.local.json`; any other change must be flagged to the user first.

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Crate, CrateView, JiraInfo } from '../shared/types';
 import type { FactoryEvent } from './events';
+import type { PastSession } from './history';
 import { DEFAULT_JIRA_PROJECTS, isWithin, refreshLabel, repoOf } from './labels';
 import { applyEvent, isSyntheticPrompt, newCrate } from './machine';
 
@@ -82,6 +83,42 @@ export class Registry {
     refreshLabel(crate, this.jiraProjects);
     this.put(crate);
     return crate;
+  }
+
+  /**
+   * Adds past sessions the factory never saw as archived crates, so they show in the Warehouse and can be
+   * resumed. Sessions already known, outside clean-room, or active since `quietSince` are skipped (hooks
+   * will report those). Returns how many were added.
+   */
+  importPast(sessions: PastSession[], quietSince: number): number {
+    const known = new Set(this.all().flatMap((c) => c.sessionIds));
+    let added = 0;
+    for (const p of sessions) {
+      if (known.has(p.sessionId) || !isWithin(p.cwd, this.cleanRoot) || p.endedAt > quietSince) continue;
+      const crate: Crate = {
+        ...newCrate({ at: p.startedAt, sessionId: p.sessionId, cwd: p.cwd, kind: 'start' }, this.cleanRoot, randomUUID()),
+        sessionIds: [p.sessionId],
+        title: p.title,
+        jiraKey: p.jiraKey,
+        zone: 'storage',
+        zoneSince: p.endedAt,
+        updatedAt: p.endedAt,
+        endedAt: p.endedAt,
+        archived: true,
+        archivedAt: p.endedAt,
+        archiveCount: 1,
+      };
+      refreshLabel(crate, this.jiraProjects);
+      if (crate.labelSource === 'auto' && !crate.title) crate.label = `${crate.repo} · ${new Date(p.startedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+      this.crates.set(crate.id, crate);
+      known.add(p.sessionId);
+      added++;
+    }
+    if (added) {
+      this.scheduleSave();
+      for (const l of this.listeners) l();
+    }
+    return added;
   }
 
   /** Points an existing crate at a new factory terminal (resume / bring back). */

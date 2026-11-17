@@ -496,6 +496,13 @@ export class Ui {
         <header>
           <h2>WAREHOUSE</h2>
           <input id="wh-search" placeholder="Search name, ticket, date…" value="${esc(this.warehouseQuery)}" />
+          ${this.button({
+            label: 'Import older sessions',
+            run: async () => {
+              const { added, scanned } = await post<{ added: number; scanned: number }>('/api/history/import');
+              this.toast(added ? `Imported ${added} past session${added === 1 ? '' : 's'}` : `Nothing new (${scanned} past sessions already here)`);
+            },
+          })}
           <button class="icon" ${this.act(() => this.closeWarehouse())} title="Close">✕</button>
         </header>
         ${shelves || `<p class="empty">${q ? 'Nothing matches that search.' : 'Nothing archived yet. Archive a crate from its window and it ships here.'}</p>`}

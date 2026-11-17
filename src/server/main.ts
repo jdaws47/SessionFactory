@@ -1,12 +1,13 @@
 import path from 'node:path';
 import type { WebSocket } from 'ws';
 import type { Crate, FactoryState } from '../shared/types';
-import { CLEAN_ROOT, DIST_DIR, EVENTS_DIR, HOST, PORT, REGISTRY_FILE, REPO_DIR, RUN_DIR } from './config';
+import { CLAUDE_PROJECTS_DIR, CLEAN_ROOT, DIST_DIR, EVENTS_DIR, HOST, PORT, REGISTRY_FILE, REPO_DIR, RUN_DIR } from './config';
 import { FactoryServer, HttpError } from './http';
 import { handoffBlocker } from './handoff';
+import { scanHistory } from './history';
 import { EventIngestor } from './ingest';
 import { Jira, JIRA_KEY_RE } from './jira';
-import { snippet } from './labels';
+import { DEFAULT_JIRA_PROJECTS, snippet } from './labels';
 import { Registry } from './registry';
 import { claudeCommand, newSlot, SLOT_RE, Terminals } from './terminals';
 
@@ -159,6 +160,15 @@ async function pollJira(): Promise<void> {
   }
 }
 
+/** Brings sessions from before the factory existed (or run without hooks) into the Warehouse. Reads ~/.claude only. */
+async function importHistory(): Promise<{ added: number; scanned: number }> {
+  const sessions = await scanHistory(CLAUDE_PROJECTS_DIR, CLEAN_ROOT, DEFAULT_JIRA_PROJECTS);
+  const added = registry.importPast(sessions, Date.now() - 30 * 60_000);
+  return { added, scanned: sessions.length };
+}
+
+app.route('POST', '/api/history/import', () => importHistory());
+
 app.socket('/ws', (ws) => {
   clients.add(ws);
   ws.on('close', () => clients.delete(ws));
@@ -197,6 +207,9 @@ const jiraPoll = setInterval(() => void pollJira(), 5 * 60_000);
 setTimeout(() => void pollJira(), 5000);
 
 await app.listen(PORT, HOST);
+void importHistory()
+  .then(({ added }) => added && console.log(`  imported ${added} past session(s) into the Warehouse`))
+  .catch((err) => console.warn(`  history import failed: ${(err as Error).message}`));
 console.log(`Session Factory running at http://${HOST}:${PORT}`);
 if (!terminalsAvailable) console.log('  tmux not found: factory terminals disabled');
 if (!jira.configured) console.log('  Jira not configured (no JIRA_*/ATLASSIAN_* env): run scrub-in in this shell first to enable the ticket hopper');
