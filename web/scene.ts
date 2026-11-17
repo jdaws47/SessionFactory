@@ -777,7 +777,7 @@ function strain(t: number, offset: number): number {
 
 /**
  * Cogs overlap the crate's sides: turning while Claude works, straining against a jam while it waits on you.
- * A jammed machine gets a hazard frame and a big alert badge. Signs sit on the side away from the bus.
+ * A jammed machine gets a big alert badge. Signs sit on the side away from the bus.
  */
 function machineFront(ctx: CanvasRenderingContext2D, pos: Point, t: number, crate: CrateView | undefined): void {
   const mode = modeOf(crate);
@@ -789,7 +789,6 @@ function machineFront(ctx: CanvasRenderingContext2D, pos: Point, t: number, crat
 
   const topRow = pos.y < TOP_ROW_Y + 1;
   if (mode === 'jammed') {
-    hazardRim(ctx, { x: pos.x - MACHINE_W / 2 - 6, y: pos.y - MACHINE_H / 2 - 6, w: MACHINE_W + 12, h: MACHINE_H + 12 }, 6);
     const by = topRow ? pos.y - MACHINE_H / 2 - 22 : pos.y + MACHINE_H / 2 - 14;
     ctx.save();
     ctx.shadowColor = C.alert;
@@ -969,43 +968,6 @@ function foundation(g: CanvasRenderingContext2D, key: Area, a: (typeof AREAS)[Ar
   }
 }
 
-/** Yellow/black hazard-striped frame of the given thickness around a rectangle. */
-function hazardRim(g: CanvasRenderingContext2D, a: { x: number; y: number; w: number; h: number }, thickness: number): void {
-  const rim = new Path2D();
-  addSquircle(rim, a.x, a.y, a.w, a.h, RADIUS.large);
-  addSquircle(rim, a.x + thickness, a.y + thickness, a.w - thickness * 2, a.h - thickness * 2, RADIUS.large - thickness / 2);
-  g.save();
-  g.clip(rim, 'evenodd');
-  g.fillStyle = '#facc15';
-  g.fillRect(a.x, a.y, a.w, a.h);
-  g.fillStyle = '#18140c';
-  for (let i = -a.h; i < a.w; i += 14) {
-    g.beginPath();
-    g.moveTo(a.x + i, a.y + a.h);
-    g.lineTo(a.x + i + 7, a.y + a.h);
-    g.lineTo(a.x + i + 7 + a.h, a.y);
-    g.lineTo(a.x + i + a.h, a.y);
-    g.closePath();
-    g.fill();
-  }
-  g.restore();
-}
-
-/** Same squircle outline as squirclePath, but into a Path2D (needed for the even-odd hazard rim). */
-function addSquircle(p: Path2D, x: number, y: number, w: number, h: number, r: number): void {
-  r = Math.max(0, Math.min(r, w / 2, h / 2));
-  const k = r * 0.16;
-  p.moveTo(x + r, y);
-  p.lineTo(x + w - r, y);
-  p.bezierCurveTo(x + w - k, y, x + w, y + k, x + w, y + r);
-  p.lineTo(x + w, y + h - r);
-  p.bezierCurveTo(x + w, y + h - k, x + w - k, y + h, x + w - r, y + h);
-  p.lineTo(x + r, y + h);
-  p.bezierCurveTo(x + k, y + h, x, y + h - k, x, y + h - r);
-  p.lineTo(x, y + r);
-  p.bezierCurveTo(x, y + k, x + k, y, x + r, y);
-  p.closePath();
-}
 
 /** Overhead bridge crane: rails, a bridge at the trolley's row, and the magnetic lifter on the trolley. */
 function drawCrane(ctx: CanvasRenderingContext2D, crane: Crane, r: { left: number; right: number; top: number; bottom: number }): void {
