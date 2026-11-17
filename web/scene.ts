@@ -1,6 +1,7 @@
 import type { CrateView } from '../src/shared/types';
 import { ALL_TRACKS, BELT_SPEED, FREIGHT_LOAD, fromHopper, HOPPER_DROP, JUNCTIONS, LOOP, NET, type SlotRef, type Track, travel, type Waypoint, YARD } from './belts';
 import { AREAS, type Area, CRATE_H, CRATE_W, floorArea, H, HOPPER, OPERATOR, type Point, TRAIN_Y, W } from './layout';
+import { Crane } from './crane';
 import { reorderQueue } from './queue';
 import { squircleAt, squirclePath } from './shapes';
 
@@ -129,11 +130,10 @@ export class Scene {
   /** How far each belt section has travelled (key "belt:section"); sections only advance while carrying something. */
   private beltOffset = new Map<string, number>();
   private running = new Set<string>([sectionKey(LOOP, 0)]);
-  /** Where the storage crane's trolley is; it stays where it last put something down. */
+  /** The storage yard's crane; it carries crates between the belt and the yard and parks at home. */
   /** Physical order of crates on the dock belt, front first. */
   private dockQueue: string[] = [];
-  private crane: Point = { x: (YARD.rails.left + YARD.rails.right) / 2, y: YARD.rails.top + 10 };
-  private craneBusy = false;
+  private crane = new Crane(YARD.home);
 
   setCrates(crates: CrateView[], now: number): void {
     const first = this.crates.size === 0 && this.sprites.size === 0;
@@ -255,20 +255,11 @@ export class Scene {
 
   update(dt: number): void {
     this.running = new Set([sectionKey(LOOP, 0)]);
-    this.craneBusy = false;
-    const yard = AREAS.storage;
     for (const s of this.sprites.values()) {
       if (!s.path.length && !s.next) continue;
       const target = s.path[0] ?? s.next?.path[0];
       const belt = target?.track;
-      if (!belt) {
-        if (s.x > yard.x && s.x < yard.x + yard.w && s.y > YARD.busY - 2 && s.y < yard.y + yard.h) {
-          this.craneBusy = true;
-          this.crane = { x: s.x, y: s.y };
-        }
-        continue;
-      }
-      this.running.add(sectionKey(belt, belt.sectionOf(belt.project(s))));
+      if (belt && !target?.crane) this.running.add(sectionKey(belt, belt.sectionOf(belt.project(s))));
     }
     for (const k of this.running) this.beltOffset.set(k, (this.beltOffset.get(k) ?? 0) + BELT_SPEED * dt);
 
@@ -281,6 +272,11 @@ export class Scene {
           s.next = undefined;
         }
         const p = s.path[0];
+        if (p.crane) {
+          // Wait (belt stopped) until the crane comes over, picks the crate up and sets it down.
+          this.crane.request(id, p);
+          break;
+        }
         const dx = p.x - s.x;
         const dy = p.y - s.y;
         const d = Math.hypot(dx, dy);
@@ -295,11 +291,22 @@ export class Scene {
           budget = 0;
         }
       }
-      if (s.leaving && !s.path.length && !s.next) {
+      if (s.leaving && !s.path.length && !s.next && this.crane.holding !== id) {
         s.loading = (s.loading ?? 0) + dt;
         if (s.loading >= LOAD_SECONDS) this.sprites.delete(id);
       }
     }
+    this.crane.update(dt, {
+      get: (id) => this.sprites.get(id),
+      move: (id, p) => {
+        const s = this.sprites.get(id);
+        if (s) Object.assign(s, { x: p.x, y: p.y });
+      },
+      done: (id) => {
+        const s = this.sprites.get(id);
+        if (s?.path[0]?.crane) s.path.shift();
+      },
+    });
   }
 
   hit(p: Point): string | null {
@@ -350,11 +357,12 @@ export class Scene {
     return [...this.sprites.values()].some((s) => s.loading !== undefined || (!s.leaving && Math.hypot(s.x - FREIGHT_LOAD.x, s.y - FREIGHT_LOAD.y) < LOAD_DROP + 1 && s.path.length > 0));
   }
 
-  /** Overhead bridge crane over the storage yard: rails, a bridge at the trolley's row, and a claw. */
+  /** Overhead bridge crane over the storage yard: rails, a bridge at the trolley's row, trolley and claw. */
   private drawCrane(ctx: CanvasRenderingContext2D): void {
     const r = YARD.rails;
+    const crane = this.crane;
     for (const x of [r.left, r.right]) fillSquircle(ctx, x - 4, r.top - 6, 8, r.bottom - r.top + 12, 2, '#5b5f66');
-    const by = Math.max(r.top, Math.min(r.bottom, this.crane.y));
+    const by = crane.pos.y;
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.45)';
     ctx.shadowBlur = 8;
@@ -362,12 +370,12 @@ export class Scene {
     fillSquircle(ctx, r.left - 8, by - 6, r.right - r.left + 16, 12, RADIUS.small, C.orangeDark);
     ctx.restore();
     fillSquircle(ctx, r.left - 8, by - 6, r.right - r.left + 16, 4, 2, C.orange);
-    const tx = this.crane.x;
-    fillSquircle(ctx, tx - 16, by - 12, 32, 24, RADIUS.small, '#3a3e45');
-    fillSquircle(ctx, tx - 16, by - 12, 32, 5, 2, this.craneBusy ? '#4ade80' : '#57534e');
-    if (this.craneBusy) {
-      for (const dx of [-CRATE_W / 2 + 6, CRATE_W / 2 - 10]) fillSquircle(ctx, tx + dx, by - 4, 4, 18, 1.5, '#9ca3af');
-    }
+    const tx = crane.pos.x;
+    // Claw jaws reach out over the crate's ends as the claw lowers.
+    const reach = 18 + crane.claw * (CRATE_W / 2 - 14);
+    for (const dx of [-reach, reach - 4]) fillSquircle(ctx, tx + dx, by - 6, 4, 12 + crane.claw * 10, 1.5, '#9ca3af');
+    fillSquircle(ctx, tx - 18, by - 13, 36, 26, RADIUS.small, '#3a3e45');
+    fillSquircle(ctx, tx - 18, by - 13, 36, 5, 2, crane.busy ? '#4ade80' : '#57534e');
   }
 
   private machineStates(): { pos: Point; index: number; crate?: CrateView }[] {
@@ -481,11 +489,12 @@ export class Scene {
     const parked = c.zone === 'storage' && !moving;
     const buried = !moving && s.pileRank > 0;
 
+    const lifted = this.crane.holding === c.id;
     ctx.save();
-    ctx.globalAlpha = parked ? 0.62 : 1;
+    ctx.globalAlpha = parked && !lifted ? 0.62 : 1;
     ctx.shadowColor = 'rgba(0,0,0,0.55)';
-    ctx.shadowBlur = 8;
-    ctx.shadowOffsetY = 4;
+    ctx.shadowBlur = lifted ? 18 : 8;
+    ctx.shadowOffsetY = lifted ? 16 : 4;
     const body = ctx.createLinearGradient(0, y, 0, y + CRATE_H);
     body.addColorStop(0, crateColor(c.id, 58));
     body.addColorStop(1, crateColor(c.id, 38));

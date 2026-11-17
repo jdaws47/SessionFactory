@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ALL_TRACKS, fromHopper, LANE_BOTTOM, LANE_TOP, LOOP, NET, travel } from '../web/belts';
+import { ALL_TRACKS, fromHopper, LANE_BOTTOM, LANE_TOP, LOOP, NET, travel, YARD } from '../web/belts';
 import type { Area, Point } from '../web/layout';
 
 const zones = Object.keys(NET) as Area[];
@@ -119,6 +119,13 @@ describe('floor placement', () => {
     const pts = travel({ zone: 'dock', slot: 0 }, { zone: 'storage', slot: 4 });
     const yard = NET.storage.slots[4];
     expect(yard.kind).toBe('crane');
-    if (yard.kind === 'crane') expect(pts.slice(-2)).toEqual([yard.pickup, yard.pos]);
+    if (yard.kind === 'crane') {
+      const [pickup, spot] = pts.slice(-2);
+      expect(pickup).toMatchObject({ ...yard.pickup });
+      expect(pickup.crane).toBeUndefined();
+      expect(spot).toMatchObject({ ...yard.pos, crane: true });
+    }
+    const out = travel({ zone: 'storage', slot: 4 }, { zone: 'dock', slot: 0 });
+    expect(out[1]).toMatchObject({ x: YARD.drop.x, y: YARD.drop.y, crane: true });
   });
 });

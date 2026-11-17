@@ -274,7 +274,9 @@ export const YARD = {
   drop: { x: 1270, y: 572 },
   columns: [1244, 1370, 1496],
   rows: [656, 734, 812],
-  rails: { left: 1172, right: 1558, top: 600, bottom: 852 },
+  rails: { left: 1172, right: 1558, top: 552, bottom: 852 },
+  /** Where the crane parks between jobs: top-right corner, above the belt and clear of the crates' names. */
+  home: { x: 1530, y: 552 },
 };
 
 function craneYard(track: Track): CraneSlot[] {
@@ -303,9 +305,11 @@ export const ALL_TRACKS: Track[] = [
 /** Where zone belts split off and merge into the loop (drawn as splitter/merger blocks). */
 export const JUNCTIONS: Point[] = Object.values(NET).flatMap((z) => z.junctions);
 
-/** A point on a crate's route, tagged with the belt carrying it there (none for crane lifts, slots, the hopper drop). */
+/** A point on a crate's route, tagged with the belt carrying it there (none for slots and the hopper drop). */
 export interface Waypoint extends Point {
   track?: Track;
+  /** The crate does not move itself to this point: it waits for the storage crane to carry it. */
+  crane?: true;
 }
 
 function on(track: Track, pts: Point[]): Waypoint[] {
@@ -316,7 +320,7 @@ function leave(zoneName: Area, slot: number): Waypoint[] {
   const z = NET[zoneName];
   const s = z.slots[slot];
   if (s.kind === 'stub') return [s.pos, ...on(s.out, s.out.pts), ...on(z.track, z.track.between(s.mergeS, z.track.total))];
-  if (s.kind === 'crane') return [s.pos, s.drop, ...on(z.track, z.track.between(s.dropS, z.track.total))];
+  if (s.kind === 'crane') return [s.pos, { ...s.drop, crane: true }, ...on(z.track, z.track.between(s.dropS, z.track.total))];
   return on(z.track, z.track.between(s.s, z.track.total));
 }
 
@@ -324,7 +328,7 @@ function arrive(zoneName: Area, slot: number): Waypoint[] {
   const z = NET[zoneName];
   const s = z.slots[slot];
   if (s.kind === 'stub') return [...on(z.track, z.track.between(0, s.divergeS)), ...on(s.in, s.in.pts), s.pos];
-  if (s.kind === 'crane') return [...on(z.track, z.track.between(0, s.pickupS)), s.pickup, s.pos];
+  if (s.kind === 'crane') return [...on(z.track, z.track.between(0, s.pickupS)), s.pickup, { ...s.pos, crane: true }];
   return [...on(z.track, z.track.between(0, s.s)), s.pos];
 }
 
@@ -342,7 +346,7 @@ export function travel(from: SlotRef, to: SlotRef, lap = false): Waypoint[] {
   const b = NET[to.zone].slots[to.slot];
   if (lap) return [...leave(from.zone, from.slot), ...on(LOOP, LOOP.between(NET[from.zone].exitLoopS, NET[to.zone].entryLoopS)), ...arrive(to.zone, to.slot)];
   if (from.zone === to.zone && from.slot === to.slot) return [b.pos];
-  if (from.zone === to.zone && a.kind === 'crane' && b.kind === 'crane') return [a.pos, b.pos];
+  if (from.zone === to.zone && a.kind === 'crane' && b.kind === 'crane') return [a.pos, { ...b.pos, crane: true }];
   if (from.zone === to.zone && a.kind === 'track' && b.kind === 'track' && b.s >= a.s) {
     return [...on(NET[to.zone].track, NET[to.zone].track.between(a.s, b.s)), b.pos];
   }

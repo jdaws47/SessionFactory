@@ -1,0 +1,78 @@
+import { describe, expect, it } from 'vitest';
+import { Crane } from '../web/crane';
+import type { Point } from '../web/layout';
+
+function world(start: Point) {
+  const crates = new Map<string, Point>([['c', { ...start }]]);
+  const finished: string[] = [];
+  return {
+    crates,
+    finished,
+    api: {
+      get: (id: string) => crates.get(id),
+      move: (id: string, p: Point) => crates.set(id, { ...p }),
+      done: (id: string) => finished.push(id),
+    },
+  };
+}
+
+const HOME = { x: 500, y: 0 };
+const DT = 1 / 60;
+
+function run(crane: Crane, api: ReturnType<typeof world>['api'], seconds: number, each?: () => void): void {
+  for (let t = 0; t < seconds; t += DT) {
+    crane.update(DT, api);
+    each?.();
+  }
+}
+
+describe('storage crane', () => {
+  it('leaves the crate where it is until the crane has come over and grabbed it', () => {
+    const w = world({ x: 100, y: 0 });
+    const crane = new Crane(HOME);
+    crane.request('c', { x: 100, y: 200 });
+    run(crane, w.api, 3);
+    expect(w.crates.get('c')).toEqual({ x: 100, y: 0 });
+    expect(crane.holding).toBeNull();
+  });
+
+  it('moves one axis at a time, carries the crate, sets it down, and parks at home', () => {
+    const w = world({ x: 100, y: 0 });
+    const crane = new Crane(HOME);
+    crane.request('c', { x: 300, y: 200 });
+    let prev = { ...crane.pos };
+    let diagonal = false;
+    run(crane, w.api, 40, () => {
+      if (crane.pos.x !== prev.x && crane.pos.y !== prev.y) diagonal = true;
+      prev = { ...crane.pos };
+    });
+    expect(diagonal).toBe(false);
+    expect(w.crates.get('c')).toEqual({ x: 300, y: 200 });
+    expect(w.finished).toEqual(['c']);
+    expect(crane.pos).toEqual(HOME);
+    expect(crane.busy).toBe(false);
+  });
+
+  it('feels heavy: a short hop still takes several seconds', () => {
+    const w = world({ x: 480, y: 0 });
+    const crane = new Crane(HOME);
+    crane.request('c', { x: 480, y: 80 });
+    let elapsed = 0;
+    while (!w.finished.length && elapsed < 60) {
+      crane.update(DT, w.api);
+      elapsed += DT;
+    }
+    expect(elapsed).toBeGreaterThan(4);
+  });
+
+  it('works through queued jobs one at a time', () => {
+    const w = world({ x: 100, y: 0 });
+    w.crates.set('d', { x: 200, y: 0 });
+    const crane = new Crane(HOME);
+    crane.request('c', { x: 100, y: 100 });
+    crane.request('d', { x: 200, y: 100 });
+    crane.request('c', { x: 100, y: 100 });
+    run(crane, w.api, 90);
+    expect(w.finished).toEqual(['c', 'd']);
+  });
+});
