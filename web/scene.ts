@@ -1,6 +1,6 @@
 import type { CrateView, Zone } from '../src/shared/types';
-import { ALL_TRACKS, BELT_SPEED, LOOP, route, type Track } from './belts';
-import { AREAS, type Area, CRATE_H, CRATE_W, H, HOPPER, inRect, machineRects, OPERATOR, type Point, type Rect, slotPosition, TRAIN_Y, W } from './layout';
+import { ALL_TRACKS, BELT_SPEED, FREIGHT_LOAD, fromHopper, HOPPER_DROP, JUNCTIONS, NET, type SlotRef, type Track, travel } from './belts';
+import { AREAS, type Area, CRATE_H, CRATE_W, H, HOPPER, OPERATOR, type Point, TRAIN_Y, W } from './layout';
 import { squircleAt, squirclePath } from './shapes';
 
 const C = {
@@ -15,11 +15,11 @@ const C = {
   text: '#ece4d8',
   dim: '#9b9286',
   rail: '#4a4e55',
+  railLight: '#5f646c',
   beltSurface: '#141517',
   section: '#34363c',
   machineTop: '#565c66',
   machineBottom: '#30343a',
-  window: '#0e0f11',
   alert: '#ef4444',
   ship: '#34d399',
   plant: '#2f7466',
@@ -27,13 +27,27 @@ const C = {
   rock: '#2c2723',
 };
 
+/** Squircle radii: crates stay soft; everything else is only gently rounded. */
+const RADIUS = { crate: 14, small: 4, medium: 7, large: 12 };
+
+interface Leg {
+  path: Point[];
+  to: SlotRef;
+}
+
 interface Sprite {
   x: number;
   y: number;
-  zone: Area;
+  /** Where the crate is heading (or sits); used to keep slots sticky. */
+  at: SlotRef;
+  /** Where the trip it is on right now ends. */
+  currentTo: SlotRef;
   path: Point[];
-  target: Point;
+  /** At most one trip is queued behind the current one, so rapid state changes never pile up detours. */
+  next?: Leg;
   leaving: boolean;
+  pileRank: number;
+  pileSize: number;
 }
 
 /** Stable colour per crate (sessions roam across repos, so the directory is no use for this). */
@@ -41,6 +55,18 @@ export function crateColor(id: string, light = 52): string {
   let h = 0;
   for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) % 360;
   return `hsl(${h}, 50%, ${light}%)`;
+}
+
+function minutes(ms: number): string {
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return '<1m';
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h}h${m % 60 ? `${m % 60}m` : ''}` : `${Math.floor(h / 24)}d`;
+}
+
+function short(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
 /** Splits text into at most `lines` lines that fit `width`, ellipsising the last. */
@@ -70,18 +96,6 @@ function wrap(ctx: CanvasRenderingContext2D, text: string, width: number, lines:
   });
 }
 
-function minutes(ms: number): string {
-  const m = Math.floor(ms / 60000);
-  if (m < 1) return '<1m';
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  return h < 24 ? `${h}h${m % 60 ? `${m % 60}m` : ''}` : `${Math.floor(h / 24)}d`;
-}
-
-function short(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
-}
-
 /** Deterministic pseudo-random numbers so scenery stays put between reloads. */
 function seeded(seed: number): () => number {
   return () => {
@@ -96,10 +110,11 @@ function fillSquircle(ctx: CanvasRenderingContext2D, x: number, y: number, w: nu
   ctx.fill();
 }
 
+const QUEUE_ZONES = new Set<Zone>(['dock', 'intake']);
+
 export class Scene {
   private sprites = new Map<string, Sprite>();
   private crates = new Map<string, CrateView>();
-  private workingCount = 0;
   private archivedCount = 0;
   private serverNow = Date.now();
   private clientAtSync = Date.now();
@@ -114,53 +129,109 @@ export class Scene {
     this.archivedCount = crates.filter((c) => c.archived).length;
 
     const byZone = new Map<Zone, CrateView[]>();
-    for (const c of crates) {
-      if (!c.archived) byZone.set(c.zone, [...(byZone.get(c.zone) ?? []), c]);
-    }
-    this.workingCount = byZone.get('working')?.length ?? 0;
+    for (const c of crates) if (!c.archived) byZone.set(c.zone, [...(byZone.get(c.zone) ?? []), c]);
+
     for (const [zone, list] of byZone) {
-      list.sort((a, b) => (zone === 'dock' ? a.zoneSince - b.zoneSince : a.startedAt - b.startedAt));
-      list.forEach((c, i) => this.place(c, slotPosition(zone, i, list.length), first));
+      const assigned = QUEUE_ZONES.has(zone) ? this.queueSlots(zone, list) : this.stickySlots(zone, list);
+      const piles = new Map<number, CrateView[]>();
+      for (const c of list) piles.set(assigned.get(c.id)!, [...(piles.get(assigned.get(c.id)!) ?? []), c]);
+      for (const [slot, pile] of piles) {
+        pile.sort((a, b) => b.zoneSince - a.zoneSince);
+        pile.forEach((c, rank) => this.place(c, { zone, slot }, first, rank, pile.length));
+      }
     }
 
     for (const [id, s] of this.sprites) {
       const c = this.crates.get(id);
       if (!c) this.sprites.delete(id);
       else if (c.archived && !s.leaving) {
-        s.path = route(s.zone, 'freight', { x: AREAS.freight.x + 160, y: TRAIN_Y - 34 });
+        this.go(s, { zone: 'freight', slot: 0 });
         s.leaving = true;
-        s.zone = 'freight';
+        s.pileRank = 0;
+        s.pileSize = 1;
       }
     }
   }
 
-  private place(c: CrateView, target: Point, instant: boolean): void {
+  /** Dock and intake are queues on the belt itself: order decides position, the back of the queue piles up. */
+  private queueSlots(zone: Zone, list: CrateView[]): Map<string, number> {
+    const cap = NET[zone].slots.length;
+    const ordered = [...list].sort((a, b) => (zone === 'dock' ? a.zoneSince - b.zoneSince : a.startedAt - b.startedAt));
+    return new Map(ordered.map((c, i) => [c.id, Math.min(i, cap - 1)]));
+  }
+
+  /** Machines, alert spots and storage spots keep their crate until it leaves; extras pile on the last spot. */
+  private stickySlots(zone: Zone, list: CrateView[]): Map<string, number> {
+    const cap = NET[zone].slots.length;
+    const used = new Set<number>();
+    const out = new Map<string, number>();
+    const rest: CrateView[] = [];
+    for (const c of [...list].sort((a, b) => a.zoneSince - b.zoneSince)) {
+      const s = this.sprites.get(c.id);
+      if (s && !s.leaving && s.at.zone === zone && !used.has(s.at.slot) && s.pileRank === 0) {
+        used.add(s.at.slot);
+        out.set(c.id, s.at.slot);
+      } else rest.push(c);
+    }
+    for (const c of rest) {
+      let slot = 0;
+      while (slot < cap && used.has(slot)) slot++;
+      if (slot >= cap) slot = cap - 1;
+      used.add(slot);
+      out.set(c.id, slot);
+    }
+    return out;
+  }
+
+  private place(c: CrateView, to: SlotRef, instant: boolean, pileRank: number, pileSize: number): void {
     let s = this.sprites.get(c.id);
     if (!s) {
-      const start = instant ? target : { x: HOPPER.x + HOPPER.w / 2, y: HOPPER.y + HOPPER.h };
-      s = { ...start, zone: instant ? c.zone : 'intake', path: [], target, leaving: false };
+      const pos = NET[to.zone].slots[to.slot].pos;
+      if (instant) {
+        s = { ...pos, at: to, currentTo: to, path: [], leaving: false, pileRank, pileSize };
+      } else if (c.reactivationCount > 0) {
+        s = { ...FREIGHT_LOAD, at: to, currentTo: to, path: travel({ zone: 'freight', slot: 0 }, to), leaving: false, pileRank, pileSize };
+      } else {
+        s = { x: HOPPER_DROP.x, y: HOPPER.y + HOPPER.h - CRATE_H / 2, at: to, currentTo: to, path: fromHopper(to), leaving: false, pileRank, pileSize };
+      }
       this.sprites.set(c.id, s);
+      return;
     }
     if (s.leaving) {
       s.leaving = false;
       s.path = [];
-      s.x = AREAS.freight.x + 160;
-      s.y = TRAIN_Y - 34;
-      s.zone = 'freight';
+      s.next = undefined;
+      s.x = FREIGHT_LOAD.x;
+      s.y = FREIGHT_LOAD.y;
+      s.at = { zone: 'freight', slot: 0 };
+      s.currentTo = s.at;
     }
-    if (s.zone !== c.zone) {
-      s.path = route(s.zone, c.zone, target);
-      s.zone = c.zone;
-    } else if (s.target.x !== target.x || s.target.y !== target.y) {
-      s.path = [...s.path.slice(0, -1), target];
+    s.pileRank = pileRank;
+    s.pileSize = pileSize;
+    if (s.at.zone !== to.zone || s.at.slot !== to.slot) this.go(s, to);
+  }
+
+  /** Sends a sprite to a slot along the belts, after finishing the trip it is already on. */
+  private go(s: Sprite, to: SlotRef): void {
+    const same = (a: SlotRef, b: SlotRef) => a.zone === b.zone && a.slot === b.slot;
+    if (!s.path.length && !s.next) {
+      s.path = travel(s.currentTo, to);
+      s.currentTo = to;
+    } else {
+      s.next = same(s.currentTo, to) ? undefined : { path: travel(s.currentTo, to), to };
     }
-    s.target = target;
+    s.at = to;
   }
 
   update(dt: number): void {
     for (const [id, s] of this.sprites) {
       let budget = BELT_SPEED * dt;
-      while (budget > 0 && s.path.length) {
+      while (budget > 0 && (s.path.length || s.next)) {
+        if (!s.path.length && s.next) {
+          s.path = s.next.path;
+          s.currentTo = s.next.to;
+          s.next = undefined;
+        }
         const p = s.path[0];
         const dx = p.x - s.x;
         const dy = p.y - s.y;
@@ -176,20 +247,27 @@ export class Scene {
           budget = 0;
         }
       }
-      if (s.leaving && !s.path.length) this.sprites.delete(id);
+      if (s.leaving && !s.path.length && !s.next) this.sprites.delete(id);
     }
   }
 
   hit(p: Point): string | null {
-    for (const id of [...this.sprites.keys()].reverse()) {
-      const s = this.sprites.get(id)!;
-      if (!s.leaving && Math.abs(p.x - s.x) <= CRATE_W / 2 + 3 && Math.abs(p.y - s.y) <= CRATE_H / 2 + 3) return id;
+    for (const [id, s] of this.drawOrder().reverse()) {
+      if (s.leaving) continue;
+      const { x, y } = this.pileOffset(s);
+      if (Math.abs(p.x - x) <= CRATE_W / 2 + 3 && Math.abs(p.y - y) <= CRATE_H / 2 + 3) return id;
     }
     return null;
   }
 
-  isOverHopper(p: Point): boolean {
-    return inRect(p, HOPPER);
+  private drawOrder(): [string, Sprite][] {
+    return [...this.sprites.entries()].sort((a, b) => a[1].y - b[1].y || b[1].pileRank - a[1].pileRank);
+  }
+
+  private pileOffset(s: Sprite): Point {
+    const moving = s.path.length > 0 || !!s.next;
+    const k = moving ? 0 : Math.min(s.pileRank, 3);
+    return { x: s.x - k * 6, y: s.y - k * 6 };
   }
 
   private now(): number {
@@ -198,18 +276,28 @@ export class Scene {
 
   draw(ctx: CanvasRenderingContext2D, t: number, opts: { hover: string | null; selected: string | null; terminals: boolean; pixelRatio: number }): void {
     this.drawStatic(ctx, opts.pixelRatio);
-    for (const track of ALL_TRACKS) beltSections(ctx, track, t);
+    for (const track of ALL_TRACKS) drawBelt(ctx, track, t);
+    for (const j of JUNCTIONS) junction(ctx, j);
     this.drawHopper(ctx, opts.terminals);
-    this.drawMachines(ctx, t);
-    this.drawAlertPads(ctx);
-    drawOperator(ctx);
     this.drawTrain(ctx, t);
+    drawOperator(ctx);
 
-    const order = [...this.sprites.entries()].sort((a, b) => a[1].y - b[1].y);
-    for (const [id, s] of order) {
+    const machines = this.machineStates();
+    machines.forEach((m) => machineBack(ctx, m.pos, t, m.index, m.crate));
+
+    for (const [id, s] of this.drawOrder()) {
       const c = this.crates.get(id);
       if (c) this.drawCrate(ctx, c, s, id === opts.hover, id === opts.selected);
     }
+
+    machines.forEach((m) => machineFront(ctx, m.pos, t, m.crate));
+  }
+
+  private machineStates(): { pos: Point; index: number; crate?: CrateView }[] {
+    return NET.working.slots.map((slot, index) => {
+      const entry = [...this.sprites.entries()].find(([, s]) => !s.leaving && s.at.zone === 'working' && s.at.slot === index && s.pileRank === 0 && !s.path.length && !s.next);
+      return { pos: slot.pos, index, crate: entry ? this.crates.get(entry[0]) : undefined };
+    });
   }
 
   /** Scenery that never changes is painted once into an offscreen canvas per size. */
@@ -239,95 +327,73 @@ export class Scene {
     ctx.shadowBlur = 12;
     ctx.shadowOffsetY = 5;
     ctx.beginPath();
-    ctx.moveTo(x, y + 8);
-    ctx.bezierCurveTo(x, y + 1, x + 1, y, x + 10, y);
-    ctx.lineTo(x + w - 10, y);
-    ctx.bezierCurveTo(x + w - 1, y, x + w, y + 1, x + w, y + 8);
-    ctx.bezierCurveTo(x + w, y + h * 0.55, cx + 22, y + h * 0.6, cx + 20, y + h);
-    ctx.lineTo(cx - 20, y + h);
-    ctx.bezierCurveTo(cx - 22, y + h * 0.6, x, y + h * 0.55, x, y + 8);
+    ctx.moveTo(x, y + 5);
+    ctx.bezierCurveTo(x, y + 1, x + 1, y, x + 5, y);
+    ctx.lineTo(x + w - 5, y);
+    ctx.bezierCurveTo(x + w - 1, y, x + w, y + 1, x + w, y + 5);
+    ctx.bezierCurveTo(x + w, y + h * 0.55, cx + 34, y + h * 0.6, cx + 32, y + h);
+    ctx.lineTo(cx - 32, y + h);
+    ctx.bezierCurveTo(cx - 34, y + h * 0.6, x, y + h * 0.55, x, y + 5);
     const grad = ctx.createLinearGradient(0, y, 0, y + h);
     grad.addColorStop(0, C.machineTop);
     grad.addColorStop(1, C.machineBottom);
     ctx.fillStyle = grad;
     ctx.fill();
     ctx.restore();
-    fillSquircle(ctx, x - 3, y - 4, w + 6, 12, 6, C.orange);
+    fillSquircle(ctx, x - 3, y - 4, w + 6, 10, RADIUS.small, C.orange);
     ctx.fillStyle = C.text;
     ctx.font = '700 12px system-ui, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('HOPPER', cx, y + 40);
+    ctx.fillText('HOPPER', cx, y + 36);
     if (clickable) {
       ctx.fillStyle = C.amber;
       ctx.font = '600 10px system-ui, sans-serif';
-      ctx.fillText('click for a new session', cx, y + 56);
-    }
-  }
-
-  private drawMachines(ctx: CanvasRenderingContext2D, t: number): void {
-    const working = [...this.crates.values()].filter((c) => !c.archived && c.zone === 'working').sort((a, b) => a.startedAt - b.startedAt);
-    machineRects(this.workingCount).forEach((m, i) => {
-      const crate = working[i];
-      const s = crate ? this.sprites.get(crate.id) : undefined;
-      drawMachine(ctx, m, t, i, s && !s.path.length ? crate : undefined);
-    });
-  }
-
-  private drawAlertPads(ctx: CanvasRenderingContext2D): void {
-    const alerts = [...this.crates.values()].filter((c) => !c.archived && c.zone === 'alert').length;
-    for (let i = 0; i < Math.max(8, alerts); i++) {
-      const p = slotPosition('alert', i, alerts);
-      const lit = i < alerts;
-      squirclePath(ctx, p.x - 64, p.y - 36, 128, 84, 26);
-      ctx.fillStyle = lit ? 'rgba(239,68,68,0.18)' : 'rgba(255,255,255,0.03)';
-      ctx.fill();
-      ctx.strokeStyle = lit ? 'rgba(239,68,68,0.6)' : 'rgba(250,204,21,0.18)';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 6]);
-      ctx.stroke();
-      ctx.setLineDash([]);
+      ctx.fillText('click for a new session', cx, y + 52);
     }
   }
 
   private drawTrain(ctx: CanvasRenderingContext2D, t: number): void {
     const a = AREAS.freight;
-    const x0 = a.x + 22;
+    const x0 = a.x + 24;
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.5)';
     ctx.shadowBlur = 10;
     ctx.shadowOffsetY = 4;
-    const loco = ctx.createLinearGradient(0, TRAIN_Y - 24, 0, TRAIN_Y + 18);
+    const loco = ctx.createLinearGradient(0, TRAIN_Y - 22, 0, TRAIN_Y + 16);
     loco.addColorStop(0, '#f6a24a');
     loco.addColorStop(1, C.orangeDark);
-    fillSquircle(ctx, x0, TRAIN_Y - 20, 70, 38, 14, loco);
-    fillSquircle(ctx, x0 + 82, TRAIN_Y - 8, 116, 26, 8, '#4a4e55');
+    fillSquircle(ctx, x0, TRAIN_Y - 20, 66, 34, RADIUS.medium, loco);
+    fillSquircle(ctx, x0 + 76, TRAIN_Y - 8, 106, 22, RADIUS.small, '#4a4e55');
     ctx.restore();
-    fillSquircle(ctx, x0 + 10, TRAIN_Y - 13, 20, 12, 5, '#16181b');
-    fillSquircle(ctx, x0 + 48, TRAIN_Y - 32, 10, 14, 4, '#6b6f76');
+    fillSquircle(ctx, x0 + 10, TRAIN_Y - 14, 20, 11, RADIUS.small, '#16181b');
+    fillSquircle(ctx, x0 + 46, TRAIN_Y - 30, 10, 12, RADIUS.small, '#6b6f76');
     for (let i = 0; i < Math.min(this.archivedCount, 8); i++) {
-      fillSquircle(ctx, x0 + 88 + (i % 4) * 27, TRAIN_Y - 26 - Math.floor(i / 4) * 17, 23, 16, 5, i % 2 ? '#8a6f52' : '#7a614a');
+      fillSquircle(ctx, x0 + 80 + (i % 4) * 25, TRAIN_Y - 24 - Math.floor(i / 4) * 15, 22, 14, RADIUS.small, i % 2 ? '#8a6f52' : '#7a614a');
     }
-    for (const wx of [x0 + 16, x0 + 54, x0 + 100, x0 + 180]) {
-      squircleAt(ctx, wx, TRAIN_Y + 20, 14);
+    for (const wx of [x0 + 14, x0 + 50, x0 + 92, x0 + 166]) {
+      squircleAt(ctx, wx, TRAIN_Y + 16, 12);
       ctx.fillStyle = '#121315';
       ctx.fill();
     }
-    smoke(ctx, x0 + 53, TRAIN_Y - 36, t, 0);
+    smoke(ctx, x0 + 51, TRAIN_Y - 34, t, 0);
     ctx.fillStyle = C.text;
-    ctx.font = '700 13px system-ui, sans-serif';
+    ctx.font = '800 13px system-ui, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(`Warehouse  ·  ${this.archivedCount} archived`, a.x + a.w / 2, a.y + 76);
+    ctx.fillText('WAREHOUSE', a.x + 115, a.y + 120);
     ctx.fillStyle = C.dim;
-    ctx.font = '11px system-ui, sans-serif';
-    ctx.fillText('click to browse or bring back', a.x + a.w / 2, a.y + 94);
+    ctx.font = '12px system-ui, sans-serif';
+    ctx.fillText(`${this.archivedCount} archived`, a.x + 115, a.y + 138);
+    ctx.fillText('click to browse', a.x + 115, a.y + 156);
   }
 
   private drawCrate(ctx: CanvasRenderingContext2D, c: CrateView, s: Sprite, hover: boolean, selected: boolean): void {
-    const moving = s.path.length > 0;
-    const x = Math.round(s.x - CRATE_W / 2);
-    const y = Math.round(s.y - CRATE_H / 2);
+    const moving = s.path.length > 0 || !!s.next;
+    const off = this.pileOffset(s);
+    const x = Math.round(off.x - CRATE_W / 2);
+    const y = Math.round(off.y - CRATE_H / 2);
     const cx = x + CRATE_W / 2;
     const parked = c.zone === 'storage' && !moving;
+    const buried = !moving && s.pileRank > 0;
 
     ctx.save();
     ctx.globalAlpha = parked ? 0.62 : 1;
@@ -337,22 +403,17 @@ export class Scene {
     const body = ctx.createLinearGradient(0, y, 0, y + CRATE_H);
     body.addColorStop(0, crateColor(c.id, 58));
     body.addColorStop(1, crateColor(c.id, 38));
-    fillSquircle(ctx, x, y, CRATE_W, CRATE_H, 14, body);
+    fillSquircle(ctx, x, y, CRATE_W, CRATE_H, RADIUS.crate, body);
     ctx.restore();
+    if (buried) return;
 
     ctx.save();
     ctx.globalAlpha = parked ? 0.62 : 1;
     ctx.strokeStyle = crateColor(c.id, 26);
     ctx.lineWidth = 2.5;
-    squirclePath(ctx, x + 1.5, y + 1.5, CRATE_W - 3, CRATE_H - 3, 13);
+    squirclePath(ctx, x + 1.5, y + 1.5, CRATE_W - 3, CRATE_H - 3, RADIUS.crate - 1);
     ctx.stroke();
-    ctx.lineWidth = 1.5;
-    for (const [bx, by] of [[4, CRATE_H / 2], [CRATE_W - 4, CRATE_H / 2]]) {
-      squircleAt(ctx, x + bx, y + by, 3.5);
-      ctx.fillStyle = 'rgba(255,255,255,0.35)';
-      ctx.fill();
-    }
-    fillSquircle(ctx, x + 6, y + 7, CRATE_W - 12, CRATE_H - 14, 9, 'rgba(14,12,10,0.8)');
+    fillSquircle(ctx, x + 6, y + 7, CRATE_W - 12, CRATE_H - 14, RADIUS.medium, 'rgba(14,12,10,0.8)');
     ctx.fillStyle = '#fff';
     ctx.font = '700 12px system-ui, sans-serif';
     ctx.textAlign = 'center';
@@ -364,45 +425,53 @@ export class Scene {
     if (selected || hover) {
       ctx.strokeStyle = selected ? C.amber : 'rgba(255,255,255,0.85)';
       ctx.lineWidth = 2;
-      squirclePath(ctx, x - 5, y - 5, CRATE_W + 10, CRATE_H + 10, 15);
+      squirclePath(ctx, x - 5, y - 5, CRATE_W + 10, CRATE_H + 10, RADIUS.crate + 3);
       ctx.stroke();
     }
 
     ctx.textAlign = 'center';
     if (c.jiraKey && c.jiraKey !== c.label && (!moving || hover)) {
       ctx.font = '700 10px ui-monospace, monospace';
-      const w = ctx.measureText(c.jiraKey).width + 14;
-      fillSquircle(ctx, cx - w / 2, y + CRATE_H + 4, w, 16, 6, 'rgba(14,12,10,0.7)');
+      const w = ctx.measureText(c.jiraKey).width + 12;
+      fillSquircle(ctx, cx - w / 2, y + CRATE_H + 3, w, 15, RADIUS.small, 'rgba(14,12,10,0.75)');
       ctx.fillStyle = C.text;
-      ctx.fillText(c.jiraKey, cx, y + CRATE_H + 15);
+      ctx.fillText(c.jiraKey, cx, y + CRATE_H + 14);
     }
     if (moving) return;
 
+    if (s.pileSize > 1) {
+      const label = `+${s.pileSize - 1}`;
+      ctx.font = '800 10px system-ui, sans-serif';
+      const w = ctx.measureText(label).width + 10;
+      fillSquircle(ctx, x - 8, y - 8, w, 16, RADIUS.small, '#e5e7eb');
+      ctx.fillStyle = '#111';
+      ctx.fillText(label, x - 8 + w / 2, y + 4);
+    }
     if (c.zone === 'alert') {
       ctx.save();
       ctx.shadowColor = C.alert;
-      ctx.shadowBlur = 12;
-      fillSquircle(ctx, cx - 12, y - 30, 24, 24, 10, C.alert);
+      ctx.shadowBlur = 10;
+      fillSquircle(ctx, cx - 11, y - 28, 22, 22, RADIUS.medium, C.alert);
       ctx.restore();
       ctx.fillStyle = '#fff';
-      ctx.font = '900 16px system-ui, sans-serif';
-      ctx.fillText('!', cx, y - 12);
+      ctx.font = '900 15px system-ui, sans-serif';
+      ctx.fillText('!', cx, y - 11);
       if (c.alertReason) {
         ctx.fillStyle = '#fca5a5';
         ctx.font = '10px system-ui, sans-serif';
-        ctx.fillText(c.alertReason, cx, y + CRATE_H + (c.jiraKey && c.jiraKey !== c.label ? 32 : 16));
+        ctx.fillText(c.alertReason, cx, y + CRATE_H + (c.jiraKey && c.jiraKey !== c.label ? 30 : 14));
       }
     }
     if (c.zone === 'dock') {
       ctx.fillStyle = C.dim;
       ctx.font = '10px system-ui, sans-serif';
-      ctx.fillText(`waiting ${minutes(this.now() - c.zoneSince)}`, cx, y - 7);
+      ctx.fillText(`waiting ${minutes(this.now() - c.zoneSince)}`, cx, y - 6);
     }
     if (c.readyToShip) {
-      fillSquircle(ctx, x + CRATE_W - 24, y - 10, 34, 15, 6, C.ship);
+      fillSquircle(ctx, x + CRATE_W - 26, y - 9, 36, 15, RADIUS.small, C.ship);
       ctx.fillStyle = '#052e22';
       ctx.font = '800 9px system-ui, sans-serif';
-      ctx.fillText('SHIP?', x + CRATE_W - 7, y + 1);
+      ctx.fillText('SHIP?', x + CRATE_W - 8, y + 2);
     }
   }
 }
@@ -414,30 +483,28 @@ function strokeTrack(ctx: CanvasRenderingContext2D, track: Track): void {
   ctx.stroke();
 }
 
-function beltBase(ctx: CanvasRenderingContext2D, track: Track): void {
+/** Belt body, then plates with seams travelling in the belt's own direction. Later belts cover earlier ones at joins. */
+function drawBelt(ctx: CanvasRenderingContext2D, track: Track, t: number): void {
+  ctx.save();
   ctx.lineJoin = 'round';
   ctx.lineCap = 'butt';
-  ctx.strokeStyle = 'rgba(0,0,0,0.45)';
-  ctx.lineWidth = 34;
-  ctx.save();
-  ctx.translate(0, 4);
+  ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+  ctx.lineWidth = 32;
+  ctx.translate(0, 3);
   strokeTrack(ctx, track);
   ctx.restore();
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'butt';
   ctx.strokeStyle = C.rail;
   ctx.lineWidth = 30;
   strokeTrack(ctx, track);
-  ctx.strokeStyle = '#5f646c';
+  ctx.strokeStyle = C.railLight;
   ctx.lineWidth = 27;
   strokeTrack(ctx, track);
   ctx.strokeStyle = C.beltSurface;
   ctx.lineWidth = 22;
   strokeTrack(ctx, track);
-}
-
-/** The belt is drawn as plates with seams that travel in the belt's own direction. */
-function beltSections(ctx: CanvasRenderingContext2D, track: Track, t: number): void {
-  ctx.save();
-  ctx.lineJoin = 'round';
   ctx.strokeStyle = C.section;
   ctx.lineWidth = 20;
   ctx.setLineDash([26, 4]);
@@ -446,78 +513,108 @@ function beltSections(ctx: CanvasRenderingContext2D, track: Track, t: number): v
   ctx.restore();
 }
 
+/** Splitter/merger block where a zone belt meets the main loop. */
+function junction(ctx: CanvasRenderingContext2D, p: Point): void {
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.45)';
+  ctx.shadowBlur = 6;
+  ctx.shadowOffsetY = 2;
+  fillSquircle(ctx, p.x - 17, p.y - 17, 34, 34, RADIUS.medium, '#3a3e45');
+  ctx.restore();
+  fillSquircle(ctx, p.x - 17, p.y - 17, 34, 6, RADIUS.small, C.orange);
+  fillSquircle(ctx, p.x - 9, p.y - 6, 18, 14, RADIUS.small, '#1d1f23');
+}
+
 function smoke(ctx: CanvasRenderingContext2D, x: number, y: number, t: number, seed: number): void {
   for (let k = 0; k < 3; k++) {
     const phase = (t / 3200 + k / 3 + seed * 0.17) % 1;
-    const size = 8 + phase * 14;
-    squircleAt(ctx, x + phase * 12, y - phase * 36, size);
-    ctx.fillStyle = `rgba(205,200,192,${0.26 * (1 - phase)})`;
+    const size = 7 + phase * 12;
+    squirclePath(ctx, x + phase * 10 - size / 2, y - phase * 30 - size / 2, size, size, size * 0.3);
+    ctx.fillStyle = `rgba(205,200,192,${0.24 * (1 - phase)})`;
     ctx.fill();
   }
 }
 
 function drawOperator(ctx: CanvasRenderingContext2D): void {
   const { x, y } = OPERATOR;
-  fillSquircle(ctx, x - 30, y + 18, 60, 22, 9, '#3a3026');
-  fillSquircle(ctx, x - 22, y + 20, 22, 10, 4, '#5bc0eb');
-  fillSquircle(ctx, x - 13, y - 6, 26, 28, 11, '#2563eb');
-  fillSquircle(ctx, x - 10, y - 26, 20, 20, 9, '#f1c27d');
-  fillSquircle(ctx, x - 13, y - 31, 26, 11, 5, C.orange);
-  fillSquircle(ctx, x - 16, y - 23, 32, 5, 2.5, C.orange);
+  fillSquircle(ctx, x - 34, y + 14, 68, 22, RADIUS.small, '#3a3026');
+  fillSquircle(ctx, x - 26, y + 17, 24, 10, RADIUS.small, '#5bc0eb');
+  fillSquircle(ctx, x - 12, y - 10, 24, 26, RADIUS.medium, '#2563eb');
+  fillSquircle(ctx, x - 9, y - 28, 18, 18, RADIUS.medium, '#f1c27d');
+  fillSquircle(ctx, x - 12, y - 32, 24, 9, RADIUS.small, C.orange);
+  fillSquircle(ctx, x - 15, y - 25, 30, 4, 2, C.orange);
   ctx.fillStyle = C.text;
   ctx.font = '800 11px system-ui, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('YOU', x, y + 56);
+  ctx.fillText('YOU', x, y + 52);
 }
 
-function drawMachine(ctx: CanvasRenderingContext2D, m: Rect, t: number, i: number, crate: CrateView | undefined): void {
+const MACHINE_W = 148;
+const MACHINE_H = 76;
+const TOP_ROW_Y = 148;
+
+/** Machine housing behind the crate: snug around it, with stack, lamp and status band. */
+function machineBack(ctx: CanvasRenderingContext2D, pos: Point, t: number, index: number, crate: CrateView | undefined): void {
   const active = !!crate;
-  const cx = m.x + m.w / 2;
+  const x = pos.x - MACHINE_W / 2;
+  const y = pos.y - MACHINE_H / 2;
   ctx.save();
   ctx.shadowColor = active ? 'rgba(246,181,69,0.35)' : 'rgba(0,0,0,0.5)';
-  ctx.shadowBlur = active ? 22 : 12;
-  ctx.shadowOffsetY = active ? 0 : 5;
-  const body = ctx.createLinearGradient(0, m.y, 0, m.y + m.h);
+  ctx.shadowBlur = active ? 18 : 10;
+  ctx.shadowOffsetY = active ? 0 : 4;
+  const body = ctx.createLinearGradient(0, y, 0, y + MACHINE_H);
   body.addColorStop(0, C.machineTop);
   body.addColorStop(1, C.machineBottom);
-  fillSquircle(ctx, m.x, m.y, m.w, m.h, 26, body);
+  fillSquircle(ctx, x, y, MACHINE_W, MACHINE_H, RADIUS.large, body);
   ctx.restore();
-
   ctx.save();
-  squirclePath(ctx, m.x, m.y, m.w, m.h, 26);
+  squirclePath(ctx, x, y, MACHINE_W, MACHINE_H, RADIUS.large);
   ctx.clip();
   ctx.fillStyle = active ? C.orange : '#6b6258';
-  ctx.fillRect(m.x, m.y, m.w, 16);
+  ctx.fillRect(x, y, MACHINE_W, 7);
   ctx.restore();
+  fillSquircle(ctx, x + MACHINE_W - 24, y - 12, 13, 16, RADIUS.small, '#4a4e55');
+  if (active) smoke(ctx, x + MACHINE_W - 18, y - 16, t, index);
+  fillSquircle(ctx, x + 6, y + 11, 7, 7, 2, active ? '#4ade80' : '#3b3f45');
+}
 
-  fillSquircle(ctx, m.x + m.w - 31, m.y - 14, 16, 22, 6, '#4a4e55');
-  if (active) smoke(ctx, m.x + m.w - 23, m.y - 18, t, i);
+/** Cogs overlap the crate's sides, turning slowly while Claude works; the tool sign sits on the far side from the bus. */
+function machineFront(ctx: CanvasRenderingContext2D, pos: Point, t: number, crate: CrateView | undefined): void {
+  const active = !!crate;
+  const color = active ? C.amber : '#5b5f66';
+  cog(ctx, pos.x - MACHINE_W / 2 + 10, pos.y + 6, 22, active ? t / 2400 : 0, color);
+  cog(ctx, pos.x + MACHINE_W / 2 - 10, pos.y + 6, 22, active ? -t / 2400 : 0, color);
+  if (!crate) return;
+  const sign = crate.waitingOn ? `⏳ ${crate.waitingOn}` : crate.lastTool;
+  if (!sign) return;
+  ctx.font = '600 10px ui-monospace, monospace';
+  const label = short(sign, 22);
+  const tw = ctx.measureText(label).width + 14;
+  const sy = pos.y < TOP_ROW_Y + 1 ? pos.y - MACHINE_H / 2 - 20 : pos.y + MACHINE_H / 2 + 4;
+  fillSquircle(ctx, pos.x - tw / 2, sy, tw, 16, RADIUS.small, '#121315');
+  ctx.fillStyle = crate.waitingOn ? '#93c5fd' : C.amber;
+  ctx.textAlign = 'center';
+  ctx.fillText(label, pos.x, sy + 12);
+}
 
-  squircleAt(ctx, m.x + 18, m.y + 28, 10);
-  ctx.fillStyle = active ? '#4ade80' : '#3b3f45';
+/** A squircle cog: rounded-square body with four teeth. */
+function cog(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number, angle: number, color: string): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(angle);
+  ctx.fillStyle = color;
+  const tooth = size * 0.3;
+  for (let k = 0; k < 4; k++) {
+    ctx.rotate(Math.PI / 2);
+    squirclePath(ctx, -tooth / 2, -size / 2 - tooth * 0.5, tooth, tooth, 1.5);
+    ctx.fill();
+  }
+  squirclePath(ctx, -size / 2, -size / 2, size, size, RADIUS.medium);
   ctx.fill();
-
-  const wy = m.y + m.h / 2 + 10;
-  fillSquircle(ctx, cx - 68, wy - 36, 136, 72, 22, C.window);
-  if (active) {
-    const glow = ctx.createLinearGradient(0, wy - 36, 0, wy + 36);
-    glow.addColorStop(0, 'rgba(246,181,69,0.05)');
-    glow.addColorStop(1, 'rgba(246,181,69,0.28)');
-    fillSquircle(ctx, cx - 68, wy - 36, 136, 72, 22, glow);
-  }
-
-  if (crate) {
-    const sign = crate.waitingOn ? `⏳ ${crate.waitingOn}` : crate.lastTool;
-    if (sign) {
-      ctx.font = '600 10px ui-monospace, monospace';
-      const label = short(sign, 24);
-      const tw = ctx.measureText(label).width + 16;
-      fillSquircle(ctx, cx - tw / 2, m.y + 20, tw, 18, 7, '#121315');
-      ctx.fillStyle = crate.waitingOn ? '#93c5fd' : C.amber;
-      ctx.textAlign = 'center';
-      ctx.fillText(label, cx, m.y + 33);
-    }
-  }
+  squirclePath(ctx, -size * 0.17, -size * 0.17, size * 0.34, size * 0.34, 2);
+  ctx.fillStyle = '#2a2d33';
+  ctx.fill();
+  ctx.restore();
 }
 
 function paintScenery(g: CanvasRenderingContext2D): void {
@@ -541,7 +638,7 @@ function paintScenery(g: CanvasRenderingContext2D): void {
     if (rnd() < 0.5) {
       const w = 6 + rnd() * 12;
       const h = 4 + rnd() * 7;
-      squirclePath(g, p.x - w / 2, p.y - h / 2, w, h, Math.min(w, h) / 2);
+      squirclePath(g, p.x - w / 2, p.y - h / 2, w, h, Math.min(w, h) * 0.3);
       g.fillStyle = C.rock;
       g.fill();
     } else {
@@ -551,39 +648,20 @@ function paintScenery(g: CanvasRenderingContext2D): void {
 
   for (const [key, a] of Object.entries(AREAS) as [Area, (typeof AREAS)[Area]][]) foundation(g, key, a);
 
-  const rail = AREAS.freight;
   g.fillStyle = '#3d3226';
+  const rail = AREAS.freight;
   for (let x = rail.x + 16; x < rail.x + rail.w - 10; x += 13) {
-    squirclePath(g, x - 2.5, TRAIN_Y + 14, 5, 20, 2);
+    squirclePath(g, x - 2.5, TRAIN_Y + 10, 5, 20, 1.5);
     g.fill();
   }
   g.strokeStyle = '#8a8f96';
   g.lineWidth = 3;
-  for (const ry of [TRAIN_Y + 18, TRAIN_Y + 30]) {
+  for (const ry of [TRAIN_Y + 14, TRAIN_Y + 26]) {
     g.beginPath();
     g.moveTo(rail.x + 10, ry);
     g.lineTo(rail.x + rail.w - 10, ry);
     g.stroke();
   }
-
-  const dock = AREAS.dock;
-  g.strokeStyle = 'rgba(250,204,21,0.35)';
-  g.lineWidth = 2;
-  g.setLineDash([10, 8]);
-  squirclePath(g, OPERATOR.x + 50, OPERATOR.y - 36, dock.x + dock.w - OPERATOR.x - 70, 76, 34);
-  g.stroke();
-  g.setLineDash([]);
-
-  for (let i = 0; i < 9; i++) {
-    const p = slotPosition('storage', i, 9);
-    g.strokeStyle = 'rgba(160,140,110,0.25)';
-    g.lineWidth = 3;
-    squirclePath(g, p.x - 63, p.y - 33, 126, 66, 20);
-    g.stroke();
-  }
-
-  for (const track of ALL_TRACKS) if (track !== LOOP) beltBase(g, track);
-  beltBase(g, LOOP);
 }
 
 function plant(g: CanvasRenderingContext2D, x: number, y: number, rnd: () => number): void {
@@ -601,23 +679,26 @@ function plant(g: CanvasRenderingContext2D, x: number, y: number, rnd: () => num
     g.quadraticCurveTo(x + Math.cos(ang + 0.6) * len * 0.6, y + Math.sin(ang + 0.6) * len * 0.6, ex, ey);
     g.stroke();
     g.globalAlpha = 0.7;
-    squircleAt(g, ex, ey, 4);
+    squirclePath(g, ex - 2, ey - 2, 4, 4, 1);
     g.fillStyle = C.plantTip;
     g.fill();
     g.globalAlpha = 1;
   }
 }
 
+/** Title plates sit clear of the belts that enter each foundation. */
+const TITLE_INSET: Partial<Record<Area, number>> = { freight: 52, dock: 62, storage: 48 };
+
 function foundation(g: CanvasRenderingContext2D, key: Area, a: (typeof AREAS)[Area]): void {
   g.save();
   g.shadowColor = 'rgba(0,0,0,0.6)';
   g.shadowBlur = 22;
   g.shadowOffsetY = 8;
-  fillSquircle(g, a.x, a.y, a.w, a.h, 40, C.concrete);
+  fillSquircle(g, a.x, a.y, a.w, a.h, RADIUS.large, C.concrete);
   g.restore();
 
   g.save();
-  squirclePath(g, a.x, a.y, a.w, a.h, 40);
+  squirclePath(g, a.x, a.y, a.w, a.h, RADIUS.large);
   g.clip();
   g.strokeStyle = C.concreteSeam;
   g.lineWidth = 2;
@@ -644,25 +725,28 @@ function foundation(g: CanvasRenderingContext2D, key: Area, a: (typeof AREAS)[Ar
   else {
     g.strokeStyle = C.concreteEdge;
     g.lineWidth = 3;
-    squirclePath(g, a.x + 1.5, a.y + 1.5, a.w - 3, a.h - 3, 39);
+    squirclePath(g, a.x + 1.5, a.y + 1.5, a.w - 3, a.h - 3, RADIUS.large - 1);
     g.stroke();
   }
 
+  const left = a.x + (TITLE_INSET[key] ?? 16);
   g.font = '800 13px system-ui, sans-serif';
   const tw = g.measureText(a.title).width;
-  fillSquircle(g, a.x + 18, a.y + 12, tw + 24, 24, 9, key === 'alert' ? C.alert : C.orange);
+  fillSquircle(g, left, a.y + 12, tw + 20, 24, RADIUS.small, key === 'alert' ? C.alert : C.orange);
   g.fillStyle = '#1a1208';
   g.textAlign = 'left';
-  g.fillText(a.title, a.x + 30, a.y + 29);
-  g.fillStyle = C.dim;
-  g.font = '12px system-ui, sans-serif';
-  g.fillText(a.subtitle, a.x + tw + 52, a.y + 29);
+  g.fillText(a.title, left + 10, a.y + 29);
+  if (a.w > 300) {
+    g.fillStyle = C.dim;
+    g.font = '12px system-ui, sans-serif';
+    g.fillText(a.subtitle, left + tw + 30, a.y + 29);
+  }
 }
 
-function hazardRim(g: CanvasRenderingContext2D, a: Rect): void {
+function hazardRim(g: CanvasRenderingContext2D, a: { x: number; y: number; w: number; h: number }): void {
   const rim = new Path2D();
-  addSquircle(rim, a.x, a.y, a.w, a.h, 40);
-  addSquircle(rim, a.x + 7, a.y + 7, a.w - 14, a.h - 14, 33);
+  addSquircle(rim, a.x, a.y, a.w, a.h, RADIUS.large);
+  addSquircle(rim, a.x + 7, a.y + 7, a.w - 14, a.h - 14, RADIUS.large - 5);
   g.save();
   g.clip(rim, 'evenodd');
   g.fillStyle = '#facc15';

@@ -51,9 +51,11 @@ src/server/
   http.ts             Localhost-only HTTP + websocket server (Host/Origin checked)
   main.ts             Wiring, REST routes, state broadcast
 web/
-  layout.ts           Fixed 1600x900 floor: areas, slots, belt paths
+  layout.ts           Fixed 1600x900 floor: areas and props
   scene.ts            Canvas drawing and crate movement along belts
-  belts.ts            One-way conveyor network: clockwise loop + curved in/out feeders; route() between areas
+  belts.ts            One-way belt network: clockwise loop; one belt per zone (loop → zone → loop); every slot is on a
+                      zone belt (dock/intake queues) or has its own in/out branch (assemblers, alert, storage). travel() routes
+  shapes.ts           Squircle helpers; the canvas never draws true circles or ovals
   terminal.ts         xterm.js terminal attached to /ws/term/:slot
   ui.ts               Top bar, crate window (terminal or info), new-session dialog, warehouse, returned inbox
   main.ts             Canvas loop, hit-testing, websocket subscription

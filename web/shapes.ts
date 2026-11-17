@@ -22,21 +22,7 @@ export function squirclePath(ctx: CanvasRenderingContext2D, x: number, y: number
   ctx.closePath();
 }
 
-/** A squircle centred on (cx, cy): the stand-in for a dot, wheel, lamp or badge. */
+/** A small squircle centred on (cx, cy): the stand-in for a dot, wheel, lamp or badge. */
 export function squircleAt(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number): void {
-  squirclePath(ctx, cx - size / 2, cy - size / 2, size, size, size / 2);
-}
-
-/**
- * Points along a superellipse (n = 4) corner centred on (cx, cy), from one angle to another in degrees.
- * Used for belt bends so curves read as squircle corners rather than circular arcs.
- */
-export function squircleCorner(cx: number, cy: number, r: number, fromDeg: number, toDeg: number): { x: number; y: number }[] {
-  const steps = Math.max(8, Math.ceil((Math.abs(toDeg - fromDeg) / 90) * 14));
-  return Array.from({ length: steps + 1 }, (_, i) => {
-    const a = ((fromDeg + ((toDeg - fromDeg) * i) / steps) * Math.PI) / 180;
-    const c = Math.cos(a);
-    const s = Math.sin(a);
-    return { x: cx + r * Math.sign(c) * Math.sqrt(Math.abs(c)), y: cy + r * Math.sign(s) * Math.sqrt(Math.abs(s)) };
-  });
+  squirclePath(ctx, cx - size / 2, cy - size / 2, size, size, size * 0.3);
 }
