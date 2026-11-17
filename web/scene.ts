@@ -1,5 +1,5 @@
 import type { CrateView } from '../src/shared/types';
-import { ALL_TRACKS, BELT_SPEED, FREIGHT_LOAD, fromHopper, HOPPER_DROP, JUNCTIONS, LOOP, NET, type SlotRef, type Track, travel, type Waypoint, YARD } from './belts';
+import { ALL_TRACKS, BELT_SPEED, FREIGHT, fromHopper, HOPPER_DROP, JUNCTIONS, LOOP, NET, type SlotRef, type Track, travel, type Waypoint, YARD } from './belts';
 import { AREAS, type Area, CRATE_H, CRATE_W, floorArea, H, HOPPER, OPERATOR, type Point, TRAIN_Y, W } from './layout';
 import { Crane } from './crane';
 import { reorderQueue } from './queue';
@@ -55,7 +55,7 @@ interface Sprite {
 }
 
 const LOAD_SECONDS = 0.8;
-const LOAD_DROP = 40;
+const LOAD_DROP = 6;
 
 /** Stable colour per crate (sessions roam across repos, so the directory is no use for this). */
 export function crateColor(id: string, light = 52): string {
@@ -133,7 +133,7 @@ export class Scene {
   /** The storage yard's crane; it carries crates between the belt and the yard and parks at home. */
   /** Physical order of crates on the dock belt, front first. */
   private dockQueue: string[] = [];
-  private crane = new Crane(YARD.home);
+  private cranes = { storage: new Crane(YARD.home), freight: new Crane(FREIGHT.home) };
 
   setCrates(crates: CrateView[], now: number): void {
     const first = this.crates.size === 0 && this.sprites.size === 0;
@@ -219,7 +219,7 @@ export class Scene {
       if (instant) {
         s = { ...pos, at: to, currentTo: to, path: [], leaving: false, pileRank, pileSize };
       } else if (c.reactivationCount > 0) {
-        s = { x: FREIGHT_LOAD.x, y: FREIGHT_LOAD.y + LOAD_DROP, at: to, currentTo: to, path: travel({ zone: 'freight', slot: 0 }, to), leaving: false, pileRank, pileSize };
+        s = { x: FREIGHT.wagon.x, y: FREIGHT.wagon.y, at: to, currentTo: to, path: travel({ zone: 'freight', slot: 0 }, to), leaving: false, pileRank, pileSize };
       } else {
         s = { x: HOPPER_DROP.x, y: HOPPER.y + HOPPER.h - CRATE_H / 2, at: to, currentTo: to, path: fromHopper(to), leaving: false, pileRank, pileSize };
       }
@@ -231,8 +231,8 @@ export class Scene {
       s.loading = undefined;
       s.path = [];
       s.next = undefined;
-      s.x = FREIGHT_LOAD.x;
-      s.y = FREIGHT_LOAD.y;
+      s.x = FREIGHT.wagon.x;
+      s.y = FREIGHT.wagon.y;
       s.at = { zone: 'freight', slot: 0 };
       s.currentTo = s.at;
     }
@@ -274,7 +274,7 @@ export class Scene {
         const p = s.path[0];
         if (p.crane) {
           // Wait (belt stopped) until the crane comes over, picks the crate up and sets it down.
-          this.crane.request(id, p);
+          this.craneFor(p.crane).request(id, p);
           break;
         }
         const dx = p.x - s.x;
@@ -291,22 +291,32 @@ export class Scene {
           budget = 0;
         }
       }
-      if (s.leaving && !s.path.length && !s.next && this.crane.holding !== id) {
+      if (s.leaving && !s.path.length && !s.next && !this.heldBy(id)) {
         s.loading = (s.loading ?? 0) + dt;
         if (s.loading >= LOAD_SECONDS) this.sprites.delete(id);
       }
     }
-    this.crane.update(dt, {
-      get: (id) => this.sprites.get(id),
-      move: (id, p) => {
+    const crates = {
+      get: (id: string) => this.sprites.get(id),
+      move: (id: string, p: Point) => {
         const s = this.sprites.get(id);
         if (s) Object.assign(s, { x: p.x, y: p.y });
       },
-      done: (id) => {
+      done: (id: string) => {
         const s = this.sprites.get(id);
         if (s?.path[0]?.crane) s.path.shift();
       },
-    });
+    };
+    for (const crane of Object.values(this.cranes)) crane.update(dt, crates);
+  }
+
+  private craneFor(zone: Area): Crane {
+    return zone === 'freight' ? this.cranes.freight : this.cranes.storage;
+  }
+
+  /** The crane currently holding this crate, if any. */
+  private heldBy(id: string): Crane | undefined {
+    return Object.values(this.cranes).find((c) => c.holding === id);
   }
 
   hit(p: Point): string | null {
@@ -349,41 +359,8 @@ export class Scene {
     }
 
     machines.forEach((m) => machineFront(ctx, m.pos, t, m.crate));
-    drawGantry(ctx, this.loadingNow());
-    this.drawCrane(ctx);
-  }
-
-  private loadingNow(): boolean {
-    return [...this.sprites.values()].some((s) => s.loading !== undefined || (!s.leaving && Math.hypot(s.x - FREIGHT_LOAD.x, s.y - FREIGHT_LOAD.y) < LOAD_DROP + 1 && s.path.length > 0));
-  }
-
-  /** Overhead bridge crane over the storage yard: rails, a bridge at the trolley's row, trolley and claw. */
-  private drawCrane(ctx: CanvasRenderingContext2D): void {
-    const r = YARD.rails;
-    const crane = this.crane;
-    for (const x of [r.left, r.right]) fillSquircle(ctx, x - 4, r.top - 6, 8, r.bottom - r.top + 12, 2, '#5b5f66');
-    const by = crane.pos.y;
-    ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,0.45)';
-    ctx.shadowBlur = 8;
-    ctx.shadowOffsetY = 6;
-    fillSquircle(ctx, r.left - 8, by - 6, r.right - r.left + 16, 12, RADIUS.small, C.orangeDark);
-    ctx.restore();
-    fillSquircle(ctx, r.left - 8, by - 6, r.right - r.left + 16, 4, 2, C.orange);
-    const tx = crane.pos.x;
-    const ty = crane.pos.y;
-    // Magnetic lifter: a plate under the trolley that glows as it engages.
-    const charge = crane.grip;
-    if (charge > 0) {
-      ctx.save();
-      ctx.shadowColor = '#60a5fa';
-      ctx.shadowBlur = 18 * charge;
-      fillSquircle(ctx, tx - 26, ty - 18, 52, 36, RADIUS.medium, `rgba(96,165,250,${0.25 * charge})`);
-      ctx.restore();
-    }
-    fillSquircle(ctx, tx - 22, ty - 15, 44, 30, RADIUS.medium, '#2a2d33');
-    fillSquircle(ctx, tx - 16, ty - 10, 32, 20, RADIUS.small, charge > 0 ? `rgba(147,197,253,${0.35 + 0.5 * charge})` : '#3f444c');
-    fillSquircle(ctx, tx - 22, ty - 15, 44, 4, 2, crane.busy ? '#4ade80' : '#57534e');
+    drawCrane(ctx, this.cranes.storage, YARD.rails);
+    drawCrane(ctx, this.cranes.freight, FREIGHT.rails);
   }
 
   private machineStates(): { pos: Point; index: number; crate?: CrateView }[] {
@@ -447,7 +424,7 @@ export class Scene {
 
   private drawTrain(ctx: CanvasRenderingContext2D, t: number): void {
     const a = AREAS.freight;
-    const wagonX = FREIGHT_LOAD.x - 46;
+    const wagonX = FREIGHT.wagon.x - 46;
     const locoX = wagonX + 100;
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.5)';
@@ -497,7 +474,8 @@ export class Scene {
     const parked = c.zone === 'storage' && !moving;
     const buried = !moving && s.pileRank > 0;
 
-    const lifted = this.crane.holding === c.id ? this.crane.lift : 0;
+    const holder = this.heldBy(c.id);
+    const lifted = holder ? holder.lift : 0;
     ctx.save();
     if (lifted) {
       // Top-down: a lifted crate is closer to the camera (bigger) and its shadow falls further away.
@@ -535,7 +513,7 @@ export class Scene {
     const top = y + CRATE_H / 2 - (lines.length - 1) * 7 + 4;
     lines.forEach((l, i) => ctx.fillText(l, cx, top + i * 14));
     ctx.restore();
-    if (this.crane.holding === c.id) {
+    if (holder) {
       ctx.save();
       ctx.strokeStyle = 'rgba(147,197,253,0.6)';
       ctx.shadowColor = '#60a5fa';
@@ -977,30 +955,29 @@ function addSquircle(p: Path2D, x: number, y: number, w: number, h: number, r: n
   p.closePath();
 }
 
-/** Loading gantry straddling the freight belt and the wagon below it; the hook drops while a crate is loaded. */
-function drawGantry(ctx: CanvasRenderingContext2D, busy: boolean): void {
-  const { x, y } = FREIGHT_LOAD;
-  const top = y - 30;
-  const bottom = TRAIN_Y + 22;
+/** Overhead bridge crane: rails, a bridge at the trolley's row, and the magnetic lifter on the trolley. */
+function drawCrane(ctx: CanvasRenderingContext2D, crane: Crane, r: { left: number; right: number; top: number; bottom: number }): void {
+  for (const x of [r.left, r.right]) fillSquircle(ctx, x - 4, r.top - 6, 8, r.bottom - r.top + 12, 2, '#5b5f66');
+  const by = crane.pos.y;
   ctx.save();
-  ctx.shadowColor = 'rgba(0,0,0,0.4)';
-  ctx.shadowBlur = 6;
-  ctx.shadowOffsetY = 4;
-  for (const px of [x - 56, x + 50]) fillSquircle(ctx, px, top, 6, bottom - top, 2, '#5b5f66');
-  fillSquircle(ctx, x - 58, top - 6, 116, 10, RADIUS.small, C.orangeDark);
+  ctx.shadowColor = 'rgba(0,0,0,0.45)';
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetY = 6;
+  fillSquircle(ctx, r.left - 8, by - 6, r.right - r.left + 16, 12, RADIUS.small, C.orangeDark);
   ctx.restore();
-  fillSquircle(ctx, x - 58, top - 6, 116, 3, 1.5, C.orange);
-  fillSquircle(ctx, x - 12, top - 9, 24, 16, RADIUS.small, '#3a3e45');
-  if (busy) {
-    ctx.strokeStyle = '#9ca3af';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(x, top + 7);
-    ctx.lineTo(x, y - CRATE_H / 2 + 2);
-    ctx.stroke();
+  fillSquircle(ctx, r.left - 8, by - 6, r.right - r.left + 16, 4, 2, C.orange);
+  const tx = crane.pos.x;
+  const ty = crane.pos.y;
+  // Magnetic lifter: a plate under the trolley that glows as it engages.
+  const charge = crane.grip;
+  if (charge > 0) {
+    ctx.save();
+    ctx.shadowColor = '#60a5fa';
+    ctx.shadowBlur = 18 * charge;
+    fillSquircle(ctx, tx - 26, ty - 18, 52, 36, RADIUS.medium, `rgba(96,165,250,${0.25 * charge})`);
+    ctx.restore();
   }
-  ctx.fillStyle = C.dim;
-  ctx.font = '700 9px system-ui, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('LOADING', x, top - 12);
+  fillSquircle(ctx, tx - 22, ty - 15, 44, 30, RADIUS.medium, '#2a2d33');
+  fillSquircle(ctx, tx - 16, ty - 10, 32, 20, RADIUS.small, charge > 0 ? `rgba(147,197,253,${0.35 + 0.5 * charge})` : '#3f444c');
+  fillSquircle(ctx, tx - 22, ty - 15, 44, 4, 2, crane.busy ? '#4ade80' : '#57534e');
 }

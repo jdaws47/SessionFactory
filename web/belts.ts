@@ -265,7 +265,19 @@ function dockLine(): ZoneNet {
   return z;
 }
 
-export const FREIGHT_LOAD: Point = { x: 150, y: 770 };
+/**
+ * Freight station: the belt runs across the upper platform with its stop dead centre; a small magnetic
+ * crane lowers crates into the wagon on the tracks below (and lifts them back out).
+ */
+export const FREIGHT = {
+  busY: 700,
+  inX: 230,
+  outX: 60,
+  transfer: { x: 145, y: 700 },
+  wagon: { x: 145, y: 796 },
+  rails: { left: 87, right: 203, top: 680, bottom: 830 },
+  home: { x: 145, y: 748 },
+};
 
 /** Storage yard: belt along the top, crane field below. */
 export const YARD = {
@@ -284,6 +296,11 @@ export const YARD = {
   home: { x: 1365, y: 607 },
 };
 
+function freightStation(track: Track): CraneSlot[] {
+  const s = track.project(FREIGHT.transfer);
+  return [{ kind: 'crane', pos: FREIGHT.wagon, pickup: FREIGHT.transfer, drop: FREIGHT.transfer, pickupS: s, dropS: s }];
+}
+
 function craneYard(track: Track): CraneSlot[] {
   const pickupS = track.project(YARD.pickup);
   const dropS = track.project(YARD.drop);
@@ -293,7 +310,7 @@ function craneYard(track: Track): CraneSlot[] {
 export const NET: Record<Area, ZoneNet> = {
   intake: hopperLine(),
   working: zone(topZoneTrack(310, 1530, TOP_BUS), (t) => TOP_ROWS.flatMap((y) => MACHINE_COLUMNS.map((x) => stubSlot(t, TOP_BUS, { x, y })))),
-  freight: zone(bottomZoneTrack(230, 60, FREIGHT_LOAD.y), (t) => trackSlots(t, [FREIGHT_LOAD])),
+  freight: zone(bottomZoneTrack(FREIGHT.inX, FREIGHT.outX, FREIGHT.busY), freightStation),
   dock: dockLine(),
   storage: zone(bottomZoneTrack(YARD.inX, YARD.outX, YARD.busY), craneYard),
 };
@@ -313,8 +330,8 @@ export const JUNCTIONS: Point[] = Object.values(NET).flatMap((z) => z.junctions)
 /** A point on a crate's route, tagged with the belt carrying it there (none for slots and the hopper drop). */
 export interface Waypoint extends Point {
   track?: Track;
-  /** The crate does not move itself to this point: it waits for the storage crane to carry it. */
-  crane?: true;
+  /** The crate does not move itself to this point: it waits for this zone's crane to carry it. */
+  crane?: Area;
 }
 
 function on(track: Track, pts: Point[]): Waypoint[] {
@@ -325,7 +342,7 @@ function leave(zoneName: Area, slot: number): Waypoint[] {
   const z = NET[zoneName];
   const s = z.slots[slot];
   if (s.kind === 'stub') return [s.pos, ...on(s.out, s.out.pts), ...on(z.track, z.track.between(s.mergeS, z.track.total))];
-  if (s.kind === 'crane') return [s.pos, { ...s.drop, crane: true }, ...on(z.track, z.track.between(s.dropS, z.track.total))];
+  if (s.kind === 'crane') return [s.pos, { ...s.drop, crane: zoneName }, ...on(z.track, z.track.between(s.dropS, z.track.total))];
   return on(z.track, z.track.between(s.s, z.track.total));
 }
 
@@ -333,7 +350,7 @@ function arrive(zoneName: Area, slot: number): Waypoint[] {
   const z = NET[zoneName];
   const s = z.slots[slot];
   if (s.kind === 'stub') return [...on(z.track, z.track.between(0, s.divergeS)), ...on(s.in, s.in.pts), s.pos];
-  if (s.kind === 'crane') return [...on(z.track, z.track.between(0, s.pickupS)), s.pickup, { ...s.pos, crane: true }];
+  if (s.kind === 'crane') return [...on(z.track, z.track.between(0, s.pickupS)), s.pickup, { ...s.pos, crane: zoneName }];
   return [...on(z.track, z.track.between(0, s.s)), s.pos];
 }
 
@@ -351,7 +368,7 @@ export function travel(from: SlotRef, to: SlotRef, lap = false): Waypoint[] {
   const b = NET[to.zone].slots[to.slot];
   if (lap) return [...leave(from.zone, from.slot), ...on(LOOP, LOOP.between(NET[from.zone].exitLoopS, NET[to.zone].entryLoopS)), ...arrive(to.zone, to.slot)];
   if (from.zone === to.zone && from.slot === to.slot) return [b.pos];
-  if (from.zone === to.zone && a.kind === 'crane' && b.kind === 'crane') return [a.pos, { ...b.pos, crane: true }];
+  if (from.zone === to.zone && a.kind === 'crane' && b.kind === 'crane') return [a.pos, { ...b.pos, crane: to.zone }];
   if (from.zone === to.zone && a.kind === 'track' && b.kind === 'track' && b.s >= a.s) {
     return [...on(NET[to.zone].track, NET[to.zone].track.between(a.s, b.s)), b.pos];
   }

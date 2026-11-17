@@ -3,6 +3,7 @@
 #   sf              new factory terminal (scrub-in, then claude) attached here
 #   sf ls           list factory terminals
 #   sf attach SLOT  attach to a factory terminal (detach again with Ctrl-b d)
+#   sf stop-all     end every factory terminal (and the Claude sessions in them)
 set -euo pipefail
 
 repo="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
@@ -15,7 +16,7 @@ case "${1:-new}" in
   new)
     slot="sf-$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n')"
     "${tmux_cmd[@]}" new-session -d -s "$slot" -c "$clean_room" -e "SF_SLOT=$slot"
-    "${tmux_cmd[@]}" send-keys -t "$slot" -l "scrub-in; cd '$clean_room' && claude"
+    "${tmux_cmd[@]}" send-keys -t "$slot" -l "scrub-in; cd '$clean_room' && claude; exit"
     "${tmux_cmd[@]}" send-keys -t "$slot" Enter
     exec "${tmux_cmd[@]}" attach-session -t "$slot"
     ;;
@@ -25,8 +26,13 @@ case "${1:-new}" in
   attach)
     exec "${tmux_cmd[@]}" attach-session -t "${2:?usage: sf attach SLOT}"
     ;;
+  stop-all)
+    "${tmux_cmd[@]}" list-sessions -F '#{session_name}' 2>/dev/null || { echo "no factory terminals"; exit 0; }
+    read -r -p "End all of these factory terminals and their Claude sessions? [y/N] " answer
+    [[ "$answer" == [yY]* ]] && "${tmux_cmd[@]}" kill-server
+    ;;
   *)
-    sed -n '2,5p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,6p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit 1
     ;;
 esac

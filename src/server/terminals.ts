@@ -16,12 +16,15 @@ export function shellQuote(text: string): string {
   return `'${text.replace(/'/g, `'\\''`)}'`;
 }
 
-/** The line typed into a new factory terminal: always scrub-in first, then claude from clean-room. */
+/**
+ * The line typed into a new factory terminal: always scrub-in first, then claude from clean-room. The shell
+ * exits when claude does, so an ended session never leaves a terminal (or the tmux server) behind.
+ */
 export function claudeCommand(cleanRoot: string, opts: { resume?: string; prompt?: string } = {}): string {
   let cmd = `scrub-in; cd ${shellQuote(cleanRoot)} && claude`;
   if (opts.resume) cmd += ` --resume ${shellQuote(opts.resume)}`;
   if (opts.prompt) cmd += ` ${shellQuote(opts.prompt.replace(/\s+/g, ' ').trim())}`;
-  return cmd;
+  return `${cmd}; exit`;
 }
 
 /**

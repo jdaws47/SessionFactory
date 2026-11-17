@@ -123,10 +123,29 @@ describe('floor placement', () => {
       const [pickup, spot] = pts.slice(-2);
       expect(pickup).toMatchObject({ ...yard.pickup });
       expect(pickup.crane).toBeUndefined();
-      expect(spot).toMatchObject({ ...yard.pos, crane: true });
+      expect(spot).toMatchObject({ ...yard.pos, crane: 'storage' });
     }
     const out = travel({ zone: 'storage', slot: 4 }, { zone: 'dock', slot: 0 });
-    expect(out[1]).toMatchObject({ x: YARD.drop.x, y: YARD.drop.y, crane: true });
+    expect(out[1]).toMatchObject({ x: YARD.drop.x, y: YARD.drop.y, crane: 'storage' });
+  });
+});
+
+describe('freight station layout', () => {
+  it('centres the belt stop, the wagon and the crane on the platform, with rails clear of the belt legs', async () => {
+    const { AREAS } = await import('../web/layout');
+    const { FREIGHT } = await import('../web/belts');
+    const centre = AREAS.freight.x + AREAS.freight.w / 2;
+    expect((FREIGHT.inX + FREIGHT.outX) / 2).toBe(centre);
+    expect(FREIGHT.transfer.x).toBe(centre);
+    expect(FREIGHT.wagon.x).toBe(centre);
+    expect((FREIGHT.rails.left + FREIGHT.rails.right) / 2).toBe(centre);
+    expect(FREIGHT.rails.left - 4 - (FREIGHT.outX + 15)).toBeGreaterThanOrEqual(4);
+    expect(FREIGHT.inX - 15 - (FREIGHT.rails.right + 4)).toBeGreaterThanOrEqual(4);
+  });
+
+  it('archived crates are craned from the belt into the wagon', () => {
+    const pts = travel({ zone: 'dock', slot: 0 }, { zone: 'freight', slot: 0 });
+    expect(pts[pts.length - 1]).toMatchObject({ crane: 'freight' });
   });
 });
 
