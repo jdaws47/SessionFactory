@@ -191,6 +191,14 @@ export class Registry {
     });
   }
 
+  /**
+   * A session is being resumed in a factory terminal: it will land waiting for your prompt, so the crate heads
+   * for the dock now. The old process is gone; forget it so the liveness check doesn't send the crate back.
+   */
+  markResuming(id: string, now: number): void {
+    this.update(id, (c) => ({ ...c, zone: 'dock', zoneSince: now, endedAt: undefined, pid: undefined, alertReason: undefined, waitingOn: undefined }));
+  }
+
   /** Records that a session was ended on purpose (its terminal closed from the factory). */
   markEnded(id: string, now: number): void {
     this.update(id, (c) => (c.zone === 'storage' ? c : { ...c, zone: 'storage', zoneSince: now, endedAt: now, alertReason: undefined, waitingOn: undefined }));

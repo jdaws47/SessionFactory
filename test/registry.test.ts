@@ -89,6 +89,17 @@ describe('persistence and lifecycle', () => {
     expect(reg.get(id)).toMatchObject({ zone: 'storage', endedAt: 9, archived: false });
   });
 
+  it('a resumed session heads for the dock straight away and its old process no longer counts', () => {
+    reg.ingest(ev({ kind: 'prompt', sessionId: 'a', pid: 42, prompt: 'x' }));
+    reg.ingest(ev({ kind: 'end', sessionId: 'a', pid: 42 }));
+    const id = reg.all()[0].id;
+    reg.archive(id, 1);
+    reg.unarchive(id, 2);
+    reg.markResuming(id, 3);
+    reg.checkLiveness(() => false, 4);
+    expect(reg.get(id)).toMatchObject({ zone: 'dock', archived: false });
+  });
+
   it('archive and bring back keep counts and history', () => {
     reg.ingest(ev({ kind: 'end', sessionId: 'a' }));
     const id = reg.all()[0].id;

@@ -126,6 +126,7 @@ app.route('POST', '/api/crates/:id/resume', async (_b, { id }) => {
   const slot = newSlot();
   if (crate.archived) registry.unarchive(id, Date.now());
   registry.attachSlot(id, slot);
+  registry.markResuming(id, Date.now());
   await terminals.start(slot, claudeCommand(CLEAN_ROOT, { resume: sessionId }));
   broadcast();
   return { slot };
