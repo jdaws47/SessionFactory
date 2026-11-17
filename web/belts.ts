@@ -270,8 +270,9 @@ export const FREIGHT_LOAD: Point = { x: 150, y: 770 };
 /** Storage yard: belt along the top, crane field below. */
 export const YARD = {
   busY: 572,
-  pickup: { x: 1430, y: 572 },
-  drop: { x: 1270, y: 572 },
+  /** One transfer point, the middle of the belt through the yard: crates are picked up and set down here. */
+  pickup: { x: 1360, y: 572 },
+  drop: { x: 1360, y: 572 },
   columns: [1244, 1370, 1496],
   rows: [656, 734, 812],
   rails: { left: 1172, right: 1558, top: 552, bottom: 852 },
