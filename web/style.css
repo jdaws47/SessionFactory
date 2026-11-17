@@ -757,3 +757,23 @@ textarea:focus {
 .linkish:hover {
   text-decoration: underline;
 }
+
+.chip-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.chip-x {
+  font: inherit;
+  font-size: 11px;
+  background: none;
+  border: none;
+  color: var(--dim);
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.chip-x:hover {
+  color: var(--red);
+}

@@ -30,10 +30,9 @@ export class Registry {
     if (fs.existsSync(file)) {
       const saved = JSON.parse(fs.readFileSync(file, 'utf8')) as { crates: Crate[]; turnLog?: number[] };
       for (const c of saved.crates) {
-        if (isSyntheticPrompt(c.firstPrompt)) {
-          c.firstPrompt = undefined;
-          refreshLabel(c, this.jiraProjects);
-        }
+        if (isSyntheticPrompt(c.firstPrompt)) c.firstPrompt = undefined;
+        // Links are by session name only; re-derive so older prompt-based links drop away.
+        refreshLabel(c, this.jiraProjects);
         this.crates.set(c.id, c);
       }
       this.turnLog = saved.turnLog ?? [];
@@ -68,18 +67,14 @@ export class Registry {
     return true;
   }
 
-  /** Creates the crate for a factory terminal before its Claude session reports in. */
-  preregister(slot: string, opts: { label?: string; jiraKey?: string; cwd?: string }, now: number): Crate {
+  /** Creates the crate for a factory terminal before its Claude session reports in, named as the session will be. */
+  preregister(slot: string, opts: { name?: string; cwd?: string }, now: number): Crate {
     const cwd = opts.cwd ?? this.cleanRoot;
     const crate: Crate = {
       ...newCrate({ at: now, sessionId: '', cwd, kind: 'start' }, this.cleanRoot, randomUUID()),
       slot,
-      jiraKey: opts.jiraKey,
+      title: opts.name || undefined,
     };
-    if (opts.label && !opts.jiraKey) {
-      crate.label = opts.label;
-      crate.labelSource = 'manual';
-    }
     refreshLabel(crate, this.jiraProjects);
     this.put(crate);
     return crate;
@@ -153,16 +148,20 @@ export class Registry {
     return matching.length;
   }
 
-  setLabel(id: string, label: string): void {
+  /** Removes the crate's Jira link and stops it being detected again. */
+  unlinkJira(id: string): void {
     this.update(id, (c) => {
-      const next: Crate = { ...c };
-      if (label.trim()) {
-        next.label = label.trim();
-        next.labelSource = 'manual';
-      } else {
-        next.labelSource = 'auto';
-        refreshLabel(next, this.jiraProjects);
-      }
+      const next: Crate = { ...c, jiraKey: undefined, jira: undefined, jiraUnlinked: true, labelSource: c.labelSource === 'jira' ? 'auto' : c.labelSource };
+      refreshLabel(next, this.jiraProjects);
+      return next;
+    });
+  }
+
+  /** The session was renamed: the crate takes the new session name. */
+  setTitle(id: string, title: string): void {
+    this.update(id, (c) => {
+      const next: Crate = { ...c, title, labelSource: 'auto' };
+      refreshLabel(next, this.jiraProjects);
       return next;
     });
   }

@@ -64,12 +64,12 @@ function liveTerminal(c: Crate): boolean {
   return !!c.slot && terminals.liveSlots.has(c.slot);
 }
 
-/** Starts a fresh factory terminal for a new crate. */
-async function startNew(opts: { label?: string; jiraKey?: string; prompt?: string }): Promise<{ crateId: string; slot: string }> {
+/** Starts a fresh factory terminal for a new crate; a name becomes the Claude session's name (--name). */
+async function startNew(opts: { name?: string; prompt?: string }): Promise<{ crateId: string; slot: string }> {
   requireTerminals();
   const slot = newSlot();
-  const crate = registry.preregister(slot, { label: opts.label, jiraKey: opts.jiraKey }, Date.now());
-  await terminals.start(slot, claudeCommand(CLEAN_ROOT, { prompt: opts.prompt }));
+  const crate = registry.preregister(slot, { name: opts.name }, Date.now());
+  await terminals.start(slot, claudeCommand(CLEAN_ROOT, { name: opts.name, prompt: opts.prompt }));
   broadcast();
   return { crateId: crate.id, slot };
 }
@@ -101,9 +101,19 @@ app.route('POST', '/api/crates/:id/unarchive', (_b, { id }) => {
   crateOr404(id);
   registry.unarchive(id, Date.now());
 });
-app.route('POST', '/api/crates/:id/label', (body, { id }) => {
+/** Renames the Claude session itself (/rename in its factory terminal); the crate follows the session name. */
+app.route('POST', '/api/crates/:id/rename', async (body, { id }) => {
+  const crate = crateOr404(id);
+  const name = String(body.name ?? '').replace(/\s+/g, ' ').trim();
+  if (!name) throw new HttpError(400, 'A name is needed.');
+  if (!liveTerminal(crate)) throw new HttpError(409, 'This session runs outside the factory: rename it in its own terminal with /rename.');
+  if (crate.zone !== 'dock' && crate.zone !== 'intake') throw new HttpError(409, 'Claude is busy in this session; rename it once it is waiting for you.');
+  await terminals.sendLine(crate.slot!, `/rename ${name}`);
+  registry.setTitle(id, name);
+});
+app.route('POST', '/api/crates/:id/unlink-jira', (_b, { id }) => {
   crateOr404(id);
-  registry.setLabel(id, String(body.label ?? ''));
+  registry.unlinkJira(id);
 });
 app.route('POST', '/api/crates/:id/dismiss-returned', (_b, { id }) => {
   crateOr404(id);
@@ -112,7 +122,7 @@ app.route('POST', '/api/crates/:id/dismiss-returned', (_b, { id }) => {
 app.route('POST', '/api/labels/archive', (body) => ({ archived: registry.archiveLabel(String(body.label ?? ''), Date.now()) }));
 
 app.route('POST', '/api/terminals', (body) =>
-  startNew({ label: body.label ? String(body.label) : undefined, prompt: body.prompt ? String(body.prompt) : undefined }),
+  startNew({ name: body.label ? String(body.label).trim() : undefined, prompt: body.prompt ? String(body.prompt) : undefined }),
 );
 
 /** Resume (or move) a crate's conversation into a new factory terminal. Refused while it may still be open elsewhere. */
@@ -132,12 +142,12 @@ app.route('POST', '/api/crates/:id/resume', async (_b, { id }) => {
   return { slot };
 });
 
-/** Start a fresh session under the same label, primed with what the old one last said. */
+/** Start a fresh session under the same name, primed with what the old one last said. */
 app.route('POST', '/api/crates/:id/continue', async (_b, { id }) => {
   const crate = crateOr404(id);
-  const parts = [`Continuing work on ${crate.jiraKey && crate.jiraKey !== crate.label ? `${crate.label} (${crate.jiraKey})` : crate.label}.`];
+  const parts = [`Continuing work on ${crate.label}.`];
   if (crate.lastMessage) parts.push(`The previous session ended with: "${snippet(crate.lastMessage, 500)}"`);
-  return startNew({ label: crate.labelSource === 'manual' || crate.title ? crate.label : undefined, jiraKey: crate.jiraKey, prompt: parts.join(' ') });
+  return startNew({ name: crate.title ?? (crate.labelSource === 'manual' ? crate.label : undefined), prompt: parts.join(' ') });
 });
 
 function requireJira(): void {
@@ -164,7 +174,7 @@ app.route('POST', '/api/jira/:key/start', async (_b, { key }) => {
   if (!JIRA_KEY_RE.test(key)) throw new HttpError(400, 'not a Jira key');
   const ticket = (await jira.assigned()).find((t) => t.key === key);
   const prompt = `Let's work on ${key}${ticket ? `: ${ticket.summary}` : ''}. Start by pulling up the ticket with /vida-jira ${key}.`;
-  return startNew({ jiraKey: key, prompt });
+  return startNew({ name: key, prompt });
 });
 
 /** Read-only status poll; drives the "ready to ship" and "returned" markers. Never archives anything. */

@@ -2,9 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { findJiraKey, isWithin } from './labels';
-import { isSyntheticPrompt } from './machine';
 
-/** Metadata of a past Claude Code session. Conversation text is read only to spot a Jira key and is never kept. */
+/** Metadata of a past Claude Code session. Conversation text is never read for content or kept. */
 export interface PastSession {
   sessionId: string;
   cwd: string;
@@ -14,22 +13,11 @@ export interface PastSession {
   endedAt: number;
 }
 
-function promptText(record: { message?: { content?: unknown } }): string | undefined {
-  const content = record.message?.content;
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    const text = content.find((b) => b && typeof b === 'object' && (b as { type?: string }).type === 'text') as { text?: string } | undefined;
-    return text?.text;
-  }
-  return undefined;
-}
-
 /** Reads one transcript (.jsonl) line by line and keeps only session metadata. */
 export async function readSession(file: string, jiraProjects: string[]): Promise<PastSession | null> {
   let sessionId = path.basename(file, '.jsonl');
   let cwd: string | undefined;
   let title: string | undefined;
-  let jiraKey: string | undefined;
   let startedAt = Infinity;
   let endedAt = 0;
 
@@ -52,13 +40,9 @@ export async function readSession(file: string, jiraProjects: string[]): Promise
         endedAt = Math.max(endedAt, t);
       }
     }
-    if (!jiraKey && r.type === 'user' && !r.isMeta && !r.isSidechain) {
-      const text = promptText(r);
-      if (text && !isSyntheticPrompt(text)) jiraKey = findJiraKey(text, jiraProjects);
-    }
   }
   if (!cwd || !Number.isFinite(startedAt)) return null;
-  return { sessionId, cwd, title, jiraKey: jiraKey ?? findJiraKey(title, jiraProjects), startedAt, endedAt };
+  return { sessionId, cwd, title, jiraKey: findJiraKey(title, jiraProjects), startedAt, endedAt };
 }
 
 /** Past sessions run inside clean-room, from the transcripts in ~/.claude/projects (top-level files only). */

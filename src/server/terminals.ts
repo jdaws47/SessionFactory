@@ -20,9 +20,10 @@ export function shellQuote(text: string): string {
  * The line typed into a new factory terminal: always scrub-in first, then claude from clean-room. The shell
  * exits when claude does, so an ended session never leaves a terminal (or the tmux server) behind.
  */
-export function claudeCommand(cleanRoot: string, opts: { resume?: string; prompt?: string } = {}): string {
+export function claudeCommand(cleanRoot: string, opts: { resume?: string; prompt?: string; name?: string } = {}): string {
   let cmd = `scrub-in; cd ${shellQuote(cleanRoot)} && claude`;
   if (opts.resume) cmd += ` --resume ${shellQuote(opts.resume)}`;
+  if (opts.name) cmd += ` --name ${shellQuote(opts.name)}`;
   if (opts.prompt) cmd += ` ${shellQuote(opts.prompt.replace(/\s+/g, ' ').trim())}`;
   return `${cmd}; exit`;
 }
@@ -95,6 +96,12 @@ export class Terminals {
       await new Promise((r) => setTimeout(r, 2500));
     }
     await this.kill(slot);
+  }
+
+  /** Types a line into a factory terminal, as if you had (used for /rename). */
+  async sendLine(slot: string, line: string): Promise<void> {
+    await this.tmux(['send-keys', '-t', slot, '-l', line.replace(/[\r\n]+/g, ' ')]);
+    await this.tmux(['send-keys', '-t', slot, 'Enter']);
   }
 
   async kill(slot: string): Promise<void> {

@@ -11,6 +11,10 @@ describe('factory terminal command line', () => {
     expect(cmd).toBe(`scrub-in; cd '/cr' && claude 'it'\\''s done; rm -rf / $(whoami)'; exit`);
   });
 
+  it('names the session when asked', () => {
+    expect(claudeCommand('/cr', { name: "TF-735 it's" })).toBe(`scrub-in; cd '/cr' && claude --name 'TF-735 it'\\''s'; exit`);
+  });
+
   it('resumes by session id', () => {
     expect(claudeCommand('/cr', { resume: 'abc-123' })).toBe("scrub-in; cd '/cr' && claude --resume 'abc-123'; exit");
   });

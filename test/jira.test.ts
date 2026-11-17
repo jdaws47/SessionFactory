@@ -19,11 +19,11 @@ describe('Jira CLI output', () => {
 });
 
 describe('matching tickets to sessions', () => {
-  it('matches by detected key or by the key in the session name, but not a longer key', () => {
-    expect(crateMatchesTicket({ jiraKey: 'TF-735', label: 'warm runners' }, 'TF-735')).toBe(true);
-    expect(crateMatchesTicket({ label: 'tf-735 warm runners' }, 'TF-735')).toBe(true);
-    expect(crateMatchesTicket({ label: 'x', title: 'fix TF-735' }, 'TF-735')).toBe(true);
-    expect(crateMatchesTicket({ label: 'TF-7350 other' }, 'TF-735')).toBe(false);
-    expect(crateMatchesTicket({ label: 'XTF-735' }, 'TF-735')).toBe(false);
+  it('matches by the key in the session name, but not a longer key', () => {
+    expect(crateMatchesTicket({ jiraKey: 'TF-735' }, 'TF-735')).toBe(true);
+    expect(crateMatchesTicket({ title: 'tf-735 warm runners' }, 'TF-735')).toBe(true);
+    expect(crateMatchesTicket({ title: 'TF-7350 other' }, 'TF-735')).toBe(false);
+    expect(crateMatchesTicket({ title: 'XTF-735' }, 'TF-735')).toBe(false);
+    expect(crateMatchesTicket({}, 'TF-735')).toBe(false);
   });
 });

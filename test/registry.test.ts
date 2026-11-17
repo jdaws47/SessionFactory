@@ -41,7 +41,7 @@ describe('session linking', () => {
   });
 
   it('links events from a factory terminal slot to its pre-registered crate', () => {
-    const crate = reg.preregister('sf-1', { label: 'PORT-9', jiraKey: 'PORT-9' }, 1000);
+    const crate = reg.preregister('sf-1', { name: 'PORT-9' }, 1000);
     reg.ingest(ev({ kind: 'start', sessionId: 'z', slot: 'sf-1' }));
     expect(reg.all()).toHaveLength(1);
     expect(reg.get(crate.id)?.sessionIds).toEqual(['z']);
@@ -113,8 +113,8 @@ describe('persistence and lifecycle', () => {
   });
 
   it('archives every crate sharing a label', () => {
-    reg.ingest(ev({ kind: 'prompt', sessionId: 'a', prompt: 'TF-1 part one' }));
-    reg.ingest(ev({ kind: 'prompt', sessionId: 'b', prompt: 'TF-1 part two' }));
+    reg.ingest(ev({ kind: 'start', sessionId: 'a', title: 'TF-1' }));
+    reg.ingest(ev({ kind: 'start', sessionId: 'b', title: 'TF-1' }));
     reg.ingest(ev({ kind: 'prompt', sessionId: 'c', prompt: 'other' }));
     expect(reg.archiveLabel('TF-1', 10)).toBe(2);
     expect(reg.all().filter((c) => c.archived)).toHaveLength(2);
@@ -139,9 +139,33 @@ describe('ready-to-ship hint', () => {
   });
 });
 
+describe('unlinking a Jira ticket', () => {
+  it('drops the link and does not re-detect it from the session name', () => {
+    reg.ingest(ev({ kind: 'start', sessionId: 'a', title: 'TF-679 fixes' }));
+    const id = reg.all()[0].id;
+    expect(reg.get(id)?.jiraKey).toBe('TF-679');
+    reg.unlinkJira(id);
+    reg.ingest(ev({ kind: 'prompt', sessionId: 'a', prompt: 'more', title: 'TF-679 fixes' }));
+    expect(reg.get(id)?.jiraKey).toBeUndefined();
+    expect(reg.get(id)?.label).toBe('TF-679 fixes');
+  });
+
+  it('links by session name only, never by prompts', () => {
+    reg.ingest(ev({ kind: 'prompt', sessionId: 'b', prompt: 'look at TF-679 too' }));
+    expect(reg.all().find((c) => c.sessionIds.includes('b'))?.jiraKey).toBeUndefined();
+  });
+
+  it('a rename gives the crate the new session name', () => {
+    reg.ingest(ev({ kind: 'start', sessionId: 'c', title: 'old' }));
+    const id = reg.all().find((c) => c.sessionIds.includes('c'))!.id;
+    reg.setTitle(id, 'PORT-1 new');
+    expect(reg.get(id)).toMatchObject({ label: 'PORT-1 new', jiraKey: 'PORT-1' });
+  });
+});
+
 describe('Jira status on archived crates', () => {
   it('a ticket that moves after archiving marks the crate returned, without unarchiving it', () => {
-    reg.ingest(ev({ kind: 'prompt', sessionId: 'a', prompt: 'TF-1' }));
+    reg.ingest(ev({ kind: 'start', sessionId: 'a', title: 'TF-1' }));
     const id = reg.all()[0].id;
     reg.setJira(id, { status: 'Done', resolved: true }, 1);
     reg.archive(id, 2);

@@ -20,12 +20,12 @@ function transcript(name: string, records: unknown[]): string {
 beforeEach(() => fs.rmSync(TMP, { recursive: true, force: true }));
 
 describe('reading past sessions', () => {
-  it('keeps metadata only: id, cwd, latest custom title, time span, and a Jira key from the first real prompt', async () => {
+  it('keeps metadata only: id, cwd, latest custom title, time span; a Jira key only from the name', async () => {
     const file = transcript('s-1', [
       { type: 'user', sessionId: 's-1', cwd: `${CLEAN_ROOT}/cerebrum`, timestamp: '2026-11-01T10:00:00Z', message: { content: '<task-notification>TF-9</task-notification>' } },
       { type: 'user', sessionId: 's-1', cwd: `${CLEAN_ROOT}/cerebrum`, timestamp: '2026-11-01T10:01:00Z', message: { content: [{ type: 'text', text: 'pick up TF-735 please' }] } },
       { type: 'custom-title', sessionId: 's-1', customTitle: 'old' },
-      { type: 'custom-title', sessionId: 's-1', customTitle: 'warm runners' },
+      { type: 'custom-title', sessionId: 's-1', customTitle: 'TF-736 warm runners' },
       { type: 'assistant', sessionId: 's-1', timestamp: '2026-11-01T12:00:00Z', message: { content: 'secret reply' } },
       'not json',
     ]);
@@ -33,12 +33,20 @@ describe('reading past sessions', () => {
     expect(s).toEqual({
       sessionId: 's-1',
       cwd: `${CLEAN_ROOT}/cerebrum`,
-      title: 'warm runners',
-      jiraKey: 'TF-735',
+      title: 'TF-736 warm runners',
+      jiraKey: 'TF-736',
       startedAt: Date.parse('2026-11-01T10:00:00Z'),
       endedAt: Date.parse('2026-11-01T12:00:00Z'),
     });
     expect(JSON.stringify(s)).not.toContain('secret');
+  });
+
+  it('does not link a ticket that is only mentioned later in the session', async () => {
+    const file = transcript('s-2', [
+      { type: 'user', sessionId: 's-2', cwd: CLEAN_ROOT, timestamp: '2026-11-01T10:00:00Z', message: { content: 'review the axon PRs' } },
+      { type: 'user', sessionId: 's-2', cwd: CLEAN_ROOT, timestamp: '2026-11-01T11:00:00Z', message: { content: 'also look at TF-679 while you are there' } },
+    ]);
+    expect((await readSession(file, PROJECTS_LIST))?.jiraKey).toBeUndefined();
   });
 
   it('only returns sessions that ran inside clean-room', async () => {

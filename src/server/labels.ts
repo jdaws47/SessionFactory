@@ -32,10 +32,11 @@ export function snippet(text: string, max: number): string {
 
 /**
  * Recomputes the label in place. Priority: manual > session name (/rename, --name) > Jira key > automatic.
- * The Jira key is tracked separately either way.
+ * The Jira key comes only from the session name.
  */
 export function refreshLabel(crate: Crate, projects: string[] = DEFAULT_JIRA_PROJECTS): void {
-  crate.jiraKey ??= findJiraKey(crate.title, projects) ?? findJiraKey(crate.firstPrompt, projects);
+  // A crate is linked to a ticket only by its session name (sessions started from a ticket are named after it).
+  crate.jiraKey = crate.jiraUnlinked ? undefined : findJiraKey(crate.title, projects);
   if (crate.labelSource === 'manual') return;
   if (crate.title) {
     crate.label = crate.title;

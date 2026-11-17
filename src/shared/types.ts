@@ -22,6 +22,8 @@ export interface Crate {
   label: string;
   labelSource: LabelSource;
   jiraKey?: string;
+  /** You unlinked the Jira ticket; don't detect one again. */
+  jiraUnlinked?: boolean;
   title?: string;
   zone: Zone;
   zoneSince: number;

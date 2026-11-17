@@ -254,9 +254,10 @@ export class Ui {
   private windowHead(c: CrateView, s: FactoryState): string {
     const sameLabel = s.crates.filter((x) => !x.archived && x.label === c.label).length;
     const rename = this.act(async () => {
-      const next = window.prompt('Crate name (leave empty to follow the session name again)', c.labelSource === 'manual' ? c.label : '');
-      if (next === null) return;
-      await post(`/api/crates/${c.id}/label`, { label: next });
+      const next = window.prompt('Rename this session (runs /rename in its terminal)', c.title ?? c.label);
+      if (!next?.trim()) return;
+      await post(`/api/crates/${c.id}/rename`, { name: next });
+      this.toast(`Renamed to ${next.trim()}`);
     });
     const archive = async (endSession: boolean) => {
       if (endSession && !window.confirm(`End the Claude session in "${c.label}" and archive it?`)) return;
@@ -349,9 +350,11 @@ export class Ui {
 
   private jiraChip(c: CrateView, s: FactoryState): string {
     const text = `${c.jiraKey}${c.jira?.status ? ` · ${c.jira.status}` : ''}`;
-    return s.features.jiraHost
+    const unlink = `<button class="chip-x" title="Unlink this ticket" ${this.act(() => post(`/api/crates/${c.id}/unlink-jira`))}>✕</button>`;
+    const chip = s.features.jiraHost
       ? `<a class="chip link" href="${esc(`${s.features.jiraHost}/browse/${c.jiraKey}`)}" target="_blank" rel="noreferrer">${esc(text)} ↗</a>`
       : `<span class="chip">${esc(text)}</span>`;
+    return `<span class="chip-group">${chip}${unlink}</span>`;
   }
 
   private windowInfo(c: CrateView, s: FactoryState): string {

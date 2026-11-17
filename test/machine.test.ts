@@ -97,11 +97,11 @@ describe('zone state machine', () => {
 });
 
 describe('labels', () => {
-  it('picks up a Jira key from the first prompt', () => {
-    const crate = run({ kind: 'prompt', prompt: 'work on TF-735 reuse' });
-    expect(crate.label).toBe('TF-735');
-    expect(crate.jiraKey).toBe('TF-735');
-    expect(crate.labelSource).toBe('jira');
+  it('picks up a Jira key from the session name only', () => {
+    const named = run({ kind: 'start', title: 'TF-735' });
+    expect(named.label).toBe('TF-735');
+    expect(named.jiraKey).toBe('TF-735');
+    expect(run({ kind: 'prompt', prompt: 'work on TF-735 reuse' }).jiraKey).toBeUndefined();
   });
 
   it('ignores key-shaped text from unknown projects', () => {
@@ -118,8 +118,8 @@ describe('labels', () => {
   });
 
   it('follows the session name, including a /rename picked up on the next prompt', () => {
-    const crate = run({ kind: 'start', title: 'gamify-work' }, { kind: 'prompt', prompt: 'TF-735 go', title: 'factory' });
-    expect(crate.label).toBe('factory');
+    const crate = run({ kind: 'start', title: 'gamify-work' }, { kind: 'prompt', prompt: 'go', title: 'TF-735 factory' });
+    expect(crate.label).toBe('TF-735 factory');
     expect(crate.jiraKey).toBe('TF-735');
   });
 
