@@ -3,8 +3,15 @@ import type { Zone } from '../src/shared/types';
 /** Places on the floor. Sessions waiting on you stay in their assembler (it jams), so 'alert' has no area. */
 export type Area = Exclude<Zone, 'alert'> | 'freight';
 
-export function floorArea(zone: Zone): Area {
-  return zone === 'alert' ? 'working' : zone;
+/**
+ * Where a crate in a given state sits on the floor. Waiting on you means a jammed assembler; a session
+ * back at "intake" after it has already had turns (e.g. /clear) waits at the dock, since intake only
+ * takes brand-new crates from the hopper.
+ */
+export function floorArea(zone: Zone, turns = 0): Area {
+  if (zone === 'alert') return 'working';
+  if (zone === 'intake' && turns > 0) return 'dock';
+  return zone;
 }
 
 export interface Point {
@@ -30,7 +37,7 @@ export const CRATE_W = 118;
 export const CRATE_H = 56;
 
 export const AREAS: Record<Area, AreaDef> = {
-  intake: { x: 30, y: 36, w: 230, h: 334, title: 'INTAKE', subtitle: 'new' },
+  intake: { x: 65, y: 36, w: 160, h: 334, title: 'INTAKE', subtitle: 'new' },
   working: { x: 290, y: 36, w: 1280, h: 334, title: 'ASSEMBLY HALL', subtitle: 'claude is working · jammed machines need you' },
   freight: { x: 30, y: 510, w: 230, h: 360, title: 'FREIGHT', subtitle: 'archive' },
   dock: { x: 290, y: 510, w: 840, h: 360, title: 'LOADING DOCK', subtitle: 'waiting on you' },

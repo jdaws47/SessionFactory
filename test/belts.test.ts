@@ -4,6 +4,8 @@ import type { Area, Point } from '../web/layout';
 
 const zones = Object.keys(NET) as Area[];
 const allSlots = zones.flatMap((zone) => NET[zone].slots.map((_, slot) => ({ zone, slot })));
+/** Intake is only ever entered from the hopper. */
+const destinations = allSlots.filter((s) => s.zone !== 'intake');
 
 function distanceToBelts(p: Point): number {
   return Math.min(...ALL_TRACKS.map((t) => {
@@ -15,7 +17,7 @@ function distanceToBelts(p: Point): number {
 describe('belt network', () => {
   it('only ever travels with the loop: right on the top lane, left on the bottom lane', () => {
     for (const from of allSlots) {
-      for (const to of allSlots) {
+      for (const to of destinations) {
         const pts = travel(from, to);
         for (let i = 1; i < pts.length; i++) {
           const [a, b] = [pts[i - 1], pts[i]];
@@ -30,7 +32,7 @@ describe('belt network', () => {
     const slotPoints = zones.flatMap((z) => NET[z].slots.map((s) => s.pos));
     const isSlot = (p: Point) => slotPoints.some((s) => s.x === p.x && s.y === p.y);
     for (const from of allSlots) {
-      for (const to of allSlots) {
+      for (const to of destinations) {
         for (const p of travel(from, to)) if (!isSlot(p)) expect(distanceToBelts(p), `${from.zone}->${to.zone}`).toBeLessThan(0.5);
       }
       for (const p of fromHopper(from).slice(1)) if (!isSlot(p)) expect(distanceToBelts(p)).toBeLessThan(0.5);
@@ -50,9 +52,30 @@ describe('belt network', () => {
     expect(pts.every((p) => p.y > LANE_BOTTOM)).toBe(true);
   });
 
+  it('the hopper drops straight onto the intake belt, centred under it', () => {
+    const pts = fromHopper({ zone: 'intake', slot: 0 });
+    expect(new Set(pts.slice(0, -1).map((p) => Math.round(p.x)))).toEqual(new Set([145]));
+  });
+
   it('the loop is closed', () => {
     const start = LOOP.at(0);
     const end = LOOP.at(LOOP.total - 0.001);
     expect(Math.hypot(start.x - end.x, start.y - end.y)).toBeLessThan(1);
+  });
+});
+
+describe('floor placement', () => {
+  it('sends a session back at intake after it has had turns (e.g. /clear) to the dock', async () => {
+    const { floorArea } = await import('../web/layout');
+    expect(floorArea('intake', 0)).toBe('intake');
+    expect(floorArea('intake', 3)).toBe('dock');
+    expect(floorArea('alert', 3)).toBe('working');
+  });
+
+  it('storage crates are craned between the top belt and the yard', () => {
+    const pts = travel({ zone: 'dock', slot: 0 }, { zone: 'storage', slot: 4 });
+    const yard = NET.storage.slots[4];
+    expect(yard.kind).toBe('crane');
+    if (yard.kind === 'crane') expect(pts.slice(-2)).toEqual([yard.pickup, yard.pos]);
   });
 });

@@ -117,7 +117,17 @@ export interface TrackSlot {
   s: number;
 }
 
-export type Slot = StubSlot | TrackSlot;
+/** A spot in a crane yard: the crane lifts crates between the belt and the spot. */
+export interface CraneSlot {
+  kind: 'crane';
+  pos: Point;
+  pickup: Point;
+  drop: Point;
+  pickupS: number;
+  dropS: number;
+}
+
+export type Slot = StubSlot | TrackSlot | CraneSlot;
 
 export interface ZoneNet {
   /** One-way belt from the loop, through the zone, back to the loop. */
@@ -126,7 +136,7 @@ export interface ZoneNet {
   entryLoopS: number;
   exitLoopS: number;
   /** Where the zone belt branches off the loop and where it rejoins it. */
-  junctions: [Point, Point];
+  junctions: Point[];
 }
 
 /** The main loop runs clockwise: top lane flows right, bottom lane flows left. */
@@ -195,41 +205,76 @@ function zone(points: Point[], makeSlots: (t: Track) => Slot[]): ZoneNet {
   };
 }
 
+/**
+ * Intake is a straight belt from the hopper down to the loop. It is only ever fed by the hopper
+ * (crates returning to "intake" wait at the dock instead), so it has no entrance from the loop.
+ */
+function hopperLine(): ZoneNet {
+  const corner = { x: HOPPER_DROP.x, y: LANE_TOP };
+  const track = new Track(rounded([HOPPER_DROP, corner, { x: HOPPER_DROP.x + R, y: LANE_TOP }], R));
+  const exitLoopS = LOOP.project(track.pts[track.pts.length - 1]);
+  return {
+    track,
+    slots: trackSlots(track, [{ x: HOPPER_DROP.x, y: 336 }, { x: HOPPER_DROP.x, y: 266 }]),
+    entryLoopS: exitLoopS,
+    exitLoopS,
+    junctions: [corner],
+  };
+}
+
 function trackSlots(track: Track, positions: Point[]): TrackSlot[] {
   return positions.map((pos) => ({ kind: 'track', pos, s: track.project(pos) }));
 }
 
 const TOP_BUS = 220;
-const BOTTOM_BUS = 690;
 const TOP_ROWS = [148, 292];
-const BOTTOM_ROWS = [610, 770];
 export const MACHINE_COLUMNS = [420, 620, 820, 1020, 1220, 1420];
-const SIDE_COLUMNS = [1300, 1430];
 
-export const HOPPER_DROP: Point = { x: 145, y: 200 };
+export const HOPPER_DROP: Point = { x: 145, y: 196 };
 export const DOCK_FRONT_X = 440;
 export const DOCK_Y = 650;
 export const FREIGHT_LOAD: Point = { x: 150, y: 770 };
 
+/** Storage yard: belt along the top, crane field below. */
+export const YARD = {
+  busY: 572,
+  pickup: { x: 1430, y: 572 },
+  drop: { x: 1270, y: 572 },
+  columns: [1244, 1370, 1496],
+  rows: [656, 734, 812],
+  rails: { left: 1172, right: 1558, top: 600, bottom: 852 },
+};
+
+function craneYard(track: Track): CraneSlot[] {
+  const pickupS = track.project(YARD.pickup);
+  const dropS = track.project(YARD.drop);
+  return YARD.rows.flatMap((y) => YARD.columns.map((x) => ({ kind: 'crane' as const, pos: { x, y }, pickup: YARD.pickup, drop: YARD.drop, pickupS, dropS })));
+}
+
 export const NET: Record<Area, ZoneNet> = {
-  intake: zone(
-    [
-      { x: 60 - R, y: LANE_TOP },
-      { x: 60, y: LANE_TOP },
-      { x: 60, y: HOPPER_DROP.y },
-      { x: HOPPER_DROP.x, y: HOPPER_DROP.y },
-      { x: HOPPER_DROP.x, y: LANE_TOP },
-      { x: HOPPER_DROP.x + R, y: LANE_TOP },
-    ],
-    (t) => trackSlots(t, [{ x: 145, y: 336 }, { x: 145, y: 266 }]),
-  ),
+  intake: hopperLine(),
   working: zone(topZoneTrack(310, 1530, TOP_BUS), (t) => TOP_ROWS.flatMap((y) => MACHINE_COLUMNS.map((x) => stubSlot(t, TOP_BUS, 1, { x, y })))),
   freight: zone(bottomZoneTrack(230, 60, FREIGHT_LOAD.y), (t) => trackSlots(t, [FREIGHT_LOAD])),
   dock: zone(bottomZoneTrack(1100, 330, DOCK_Y), (t) => trackSlots(t, [0, 1, 2, 3, 4].map((i) => ({ x: DOCK_FRONT_X + i * 134, y: DOCK_Y })))),
-  storage: zone(bottomZoneTrack(1540, 1180, BOTTOM_BUS), (t) => BOTTOM_ROWS.flatMap((y) => SIDE_COLUMNS.map((x) => stubSlot(t, BOTTOM_BUS, -1, { x, y })))),
+  storage: zone(bottomZoneTrack(1540, 1180, YARD.busY), craneYard),
 };
 
-export const HOPPER_S = NET.intake.track.project(HOPPER_DROP);
+export const HOPPER_S = 0;
+
+export interface Gate {
+  zone: Area;
+  /** Where the bar crosses the belt. */
+  at: Point;
+  /** Direction the belt runs at the gate. */
+  belt: 'h' | 'v';
+  label: string[];
+}
+
+/** Gates sit where crates wait, and say why they are waiting. They lift while the belt carries something. */
+export const GATES: Gate[] = [
+  { zone: 'dock', at: { x: DOCK_FRONT_X - 72, y: DOCK_Y }, belt: 'h', label: ['waiting', 'on you'] },
+  { zone: 'intake', at: { x: HOPPER_DROP.x, y: 375 }, belt: 'v', label: ['awaiting', 'prompt'] },
+];
 
 /** Draw order: slot branches under zone belts, zone belts under the main loop. */
 export const ALL_TRACKS: Track[] = [
@@ -244,13 +289,17 @@ export const JUNCTIONS: Point[] = Object.values(NET).flatMap((z) => z.junctions)
 function leave(zoneName: Area, slot: number): Point[] {
   const z = NET[zoneName];
   const s = z.slots[slot];
-  return s.kind === 'stub' ? [s.pos, ...s.out.pts, ...z.track.between(s.mergeS, z.track.total)] : z.track.between(s.s, z.track.total);
+  if (s.kind === 'stub') return [s.pos, ...s.out.pts, ...z.track.between(s.mergeS, z.track.total)];
+  if (s.kind === 'crane') return [s.pos, s.drop, ...z.track.between(s.dropS, z.track.total)];
+  return z.track.between(s.s, z.track.total);
 }
 
 function arrive(zoneName: Area, slot: number): Point[] {
   const z = NET[zoneName];
   const s = z.slots[slot];
-  return s.kind === 'stub' ? [...z.track.between(0, s.divergeS), ...s.in.pts, s.pos] : [...z.track.between(0, s.s), s.pos];
+  if (s.kind === 'stub') return [...z.track.between(0, s.divergeS), ...s.in.pts, s.pos];
+  if (s.kind === 'crane') return [...z.track.between(0, s.pickupS), s.pickup, s.pos];
+  return [...z.track.between(0, s.s), s.pos];
 }
 
 export interface SlotRef {
@@ -263,6 +312,7 @@ export function travel(from: SlotRef, to: SlotRef): Point[] {
   const a = NET[from.zone].slots[from.slot];
   const b = NET[to.zone].slots[to.slot];
   if (from.zone === to.zone && from.slot === to.slot) return [b.pos];
+  if (from.zone === to.zone && a.kind === 'crane' && b.kind === 'crane') return [a.pos, b.pos];
   if (from.zone === to.zone && a.kind === 'track' && b.kind === 'track' && b.s >= a.s) {
     return [...NET[to.zone].track.between(a.s, b.s), b.pos];
   }

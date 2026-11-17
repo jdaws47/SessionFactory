@@ -1,5 +1,5 @@
 import type { CrateView } from '../src/shared/types';
-import { ALL_TRACKS, BELT_SPEED, FREIGHT_LOAD, fromHopper, HOPPER_DROP, JUNCTIONS, NET, type SlotRef, type Track, travel } from './belts';
+import { ALL_TRACKS, BELT_SPEED, FREIGHT_LOAD, fromHopper, type Gate, GATES, HOPPER_DROP, JUNCTIONS, LOOP, NET, type SlotRef, type Track, travel, YARD } from './belts';
 import { AREAS, type Area, CRATE_H, CRATE_W, floorArea, H, HOPPER, OPERATOR, type Point, TRAIN_Y, W } from './layout';
 import { squircleAt, squirclePath } from './shapes';
 
@@ -46,9 +46,14 @@ interface Sprite {
   /** At most one trip is queued behind the current one, so rapid state changes never pile up detours. */
   next?: Leg;
   leaving: boolean;
+  /** Seconds into being lowered into the freight wagon (archived crates only). */
+  loading?: number;
   pileRank: number;
   pileSize: number;
 }
+
+const LOAD_SECONDS = 0.8;
+const LOAD_DROP = 40;
 
 /** Stable colour per crate (sessions roam across repos, so the directory is no use for this). */
 export function crateColor(id: string, light = 52): string {
@@ -120,6 +125,12 @@ export class Scene {
   private clientAtSync = Date.now();
   private staticLayer: HTMLCanvasElement | null = null;
   private staticKey = '';
+  /** How far each belt's sections have travelled; belts only advance while they carry something. */
+  private beltOffset = new Map<Track, number>();
+  private running = new Set<Track>([LOOP]);
+  /** Where the storage crane's trolley is; it stays where it last put something down. */
+  private crane: Point = { x: (YARD.rails.left + YARD.rails.right) / 2, y: YARD.rails.top + 10 };
+  private craneBusy = false;
 
   setCrates(crates: CrateView[], now: number): void {
     const first = this.crates.size === 0 && this.sprites.size === 0;
@@ -131,7 +142,9 @@ export class Scene {
     const byZone = new Map<Area, CrateView[]>();
     for (const c of crates) {
       if (c.archived) continue;
-      const area = floorArea(c.zone);
+      let area = floorArea(c.zone, c.turns);
+      const existing = this.sprites.get(c.id);
+      if (area === 'intake' && existing && !existing.leaving && existing.at.zone !== 'intake') area = 'dock';
       byZone.set(area, [...(byZone.get(area) ?? []), c]);
     }
 
@@ -194,7 +207,7 @@ export class Scene {
       if (instant) {
         s = { ...pos, at: to, currentTo: to, path: [], leaving: false, pileRank, pileSize };
       } else if (c.reactivationCount > 0) {
-        s = { ...FREIGHT_LOAD, at: to, currentTo: to, path: travel({ zone: 'freight', slot: 0 }, to), leaving: false, pileRank, pileSize };
+        s = { x: FREIGHT_LOAD.x, y: FREIGHT_LOAD.y + LOAD_DROP, at: to, currentTo: to, path: travel({ zone: 'freight', slot: 0 }, to), leaving: false, pileRank, pileSize };
       } else {
         s = { x: HOPPER_DROP.x, y: HOPPER.y + HOPPER.h - CRATE_H / 2, at: to, currentTo: to, path: fromHopper(to), leaving: false, pileRank, pileSize };
       }
@@ -203,6 +216,7 @@ export class Scene {
     }
     if (s.leaving) {
       s.leaving = false;
+      s.loading = undefined;
       s.path = [];
       s.next = undefined;
       s.x = FREIGHT_LOAD.x;
@@ -228,6 +242,23 @@ export class Scene {
   }
 
   update(dt: number): void {
+    this.running = new Set([LOOP]);
+    this.craneBusy = false;
+    const yard = AREAS.storage;
+    for (const s of this.sprites.values()) {
+      if (!s.path.length && !s.next) continue;
+      const near = ALL_TRACKS.find((t) => {
+        const q = t.at(t.project(s));
+        return Math.hypot(q.x - s.x, q.y - s.y) < 3;
+      });
+      if (near) this.running.add(near);
+      else if (s.x > yard.x && s.x < yard.x + yard.w && s.y > YARD.busY - 2 && s.y < yard.y + yard.h) {
+        this.craneBusy = true;
+        this.crane = { x: s.x, y: s.y };
+      }
+    }
+    for (const t of this.running) this.beltOffset.set(t, (this.beltOffset.get(t) ?? 0) + BELT_SPEED * dt);
+
     for (const [id, s] of this.sprites) {
       let budget = BELT_SPEED * dt;
       while (budget > 0 && (s.path.length || s.next)) {
@@ -251,7 +282,10 @@ export class Scene {
           budget = 0;
         }
       }
-      if (s.leaving && !s.path.length && !s.next) this.sprites.delete(id);
+      if (s.leaving && !s.path.length && !s.next) {
+        s.loading = (s.loading ?? 0) + dt;
+        if (s.loading >= LOAD_SECONDS) this.sprites.delete(id);
+      }
     }
   }
 
@@ -280,7 +314,7 @@ export class Scene {
 
   draw(ctx: CanvasRenderingContext2D, t: number, opts: { hover: string | null; selected: string | null; terminals: boolean; pixelRatio: number }): void {
     this.drawStatic(ctx, opts.pixelRatio);
-    for (const track of ALL_TRACKS) drawBelt(ctx, track, t);
+    for (const track of ALL_TRACKS) drawBelt(ctx, track, this.beltOffset.get(track) ?? 0);
     for (const j of JUNCTIONS) junction(ctx, j);
     this.drawHopper(ctx, opts.terminals);
     this.drawTrain(ctx, t);
@@ -295,6 +329,66 @@ export class Scene {
     }
 
     machines.forEach((m) => machineFront(ctx, m.pos, t, m.crate));
+    for (const g of GATES) this.drawGate(ctx, g);
+    drawGantry(ctx, this.loadingNow());
+    this.drawCrane(ctx);
+  }
+
+  private loadingNow(): boolean {
+    return [...this.sprites.values()].some((s) => s.loading !== undefined || (!s.leaving && Math.hypot(s.x - FREIGHT_LOAD.x, s.y - FREIGHT_LOAD.y) < LOAD_DROP + 1 && s.path.length > 0));
+  }
+
+  /** Overhead bridge crane over the storage yard: rails, a bridge at the trolley's row, and a claw. */
+  private drawCrane(ctx: CanvasRenderingContext2D): void {
+    const r = YARD.rails;
+    for (const x of [r.left, r.right]) fillSquircle(ctx, x - 4, r.top - 6, 8, r.bottom - r.top + 12, 2, '#5b5f66');
+    const by = Math.max(r.top, Math.min(r.bottom, this.crane.y));
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.45)';
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 6;
+    fillSquircle(ctx, r.left - 8, by - 6, r.right - r.left + 16, 12, RADIUS.small, C.orangeDark);
+    ctx.restore();
+    fillSquircle(ctx, r.left - 8, by - 6, r.right - r.left + 16, 4, 2, C.orange);
+    const tx = this.crane.x;
+    fillSquircle(ctx, tx - 16, by - 12, 32, 24, RADIUS.small, '#3a3e45');
+    fillSquircle(ctx, tx - 16, by - 12, 32, 5, 2, this.craneBusy ? '#4ade80' : '#57534e');
+    if (this.craneBusy) {
+      for (const dx of [-CRATE_W / 2 + 6, CRATE_W / 2 - 10]) fillSquircle(ctx, tx + dx, by - 4, 4, 18, 1.5, '#9ca3af');
+    }
+  }
+
+  /** A zone's gate is closed while its belt is stopped with crates waiting, and lifts while the belt runs. */
+  private drawGate(ctx: CanvasRenderingContext2D, g: Gate): void {
+    const open = this.running.has(NET[g.zone].track);
+    const waiting = [...this.sprites.values()].some((s) => !s.leaving && s.at.zone === g.zone && !s.path.length && !s.next);
+    const { x, y } = g.at;
+    const horizontalBelt = g.belt === 'h';
+    const post = horizontalBelt ? { x, y: y - 24 } : { x: x + 24, y };
+    fillSquircle(ctx, post.x - 6, post.y - 6, 12, 12, RADIUS.small, '#4a4e55');
+    ctx.save();
+    ctx.translate(post.x, post.y);
+    if (!horizontalBelt) ctx.rotate(Math.PI / 2);
+    if (open) ctx.rotate(Math.PI / 2);
+    const len = 46;
+    squirclePath(ctx, -3, 0, 6, len, 2);
+    ctx.fillStyle = '#f5f5f4';
+    ctx.fill();
+    ctx.save();
+    squirclePath(ctx, -3, 0, 6, len, 2);
+    ctx.clip();
+    ctx.fillStyle = C.alert;
+    for (let k = 6; k < len; k += 12) ctx.fillRect(-3, k, 6, 6);
+    ctx.restore();
+    ctx.restore();
+    fillSquircle(ctx, post.x - 3.5, post.y - 3.5, 7, 7, 2, open ? '#4ade80' : waiting ? C.alert : '#57534e');
+    if (!waiting && !open) return;
+    ctx.fillStyle = open ? C.dim : '#fca5a5';
+    ctx.font = '600 9px system-ui, sans-serif';
+    ctx.textAlign = horizontalBelt ? 'center' : 'left';
+    const lx = horizontalBelt ? x : x + 36;
+    const ly = horizontalBelt ? y + 30 : y - 6;
+    g.label.forEach((line, i) => ctx.fillText(open ? (i ? '' : 'moving') : line, lx, ly + i * 11));
   }
 
   private machineStates(): { pos: Point; index: number; crate?: CrateView }[] {
@@ -358,36 +452,37 @@ export class Scene {
 
   private drawTrain(ctx: CanvasRenderingContext2D, t: number): void {
     const a = AREAS.freight;
-    const x0 = a.x + 24;
+    const wagonX = FREIGHT_LOAD.x - 46;
+    const locoX = wagonX + 100;
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.5)';
     ctx.shadowBlur = 10;
     ctx.shadowOffsetY = 4;
-    const loco = ctx.createLinearGradient(0, TRAIN_Y - 22, 0, TRAIN_Y + 16);
+    fillSquircle(ctx, wagonX, TRAIN_Y - 10, 92, 24, RADIUS.small, '#4a4e55');
+    const loco = ctx.createLinearGradient(0, TRAIN_Y - 22, 0, TRAIN_Y + 14);
     loco.addColorStop(0, '#f6a24a');
     loco.addColorStop(1, C.orangeDark);
-    fillSquircle(ctx, x0, TRAIN_Y - 20, 66, 34, RADIUS.medium, loco);
-    fillSquircle(ctx, x0 + 76, TRAIN_Y - 8, 106, 22, RADIUS.small, '#4a4e55');
+    fillSquircle(ctx, locoX, TRAIN_Y - 18, 52, 32, RADIUS.medium, loco);
     ctx.restore();
-    fillSquircle(ctx, x0 + 10, TRAIN_Y - 14, 20, 11, RADIUS.small, '#16181b');
-    fillSquircle(ctx, x0 + 46, TRAIN_Y - 30, 10, 12, RADIUS.small, '#6b6f76');
-    for (let i = 0; i < Math.min(this.archivedCount, 8); i++) {
-      fillSquircle(ctx, x0 + 80 + (i % 4) * 25, TRAIN_Y - 24 - Math.floor(i / 4) * 15, 22, 14, RADIUS.small, i % 2 ? '#8a6f52' : '#7a614a');
+    fillSquircle(ctx, locoX + 30, TRAIN_Y - 12, 16, 10, RADIUS.small, '#16181b');
+    fillSquircle(ctx, locoX + 8, TRAIN_Y - 28, 9, 11, RADIUS.small, '#6b6f76');
+    for (let i = 0; i < Math.min(this.archivedCount, 6); i++) {
+      fillSquircle(ctx, wagonX + 4 + (i % 3) * 29, TRAIN_Y - 24 - Math.floor(i / 3) * 14, 26, 13, RADIUS.small, i % 2 ? '#8a6f52' : '#7a614a');
     }
-    for (const wx of [x0 + 14, x0 + 50, x0 + 92, x0 + 166]) {
-      squircleAt(ctx, wx, TRAIN_Y + 16, 12);
+    for (const wx of [wagonX + 14, wagonX + 78, locoX + 12, locoX + 40]) {
+      squircleAt(ctx, wx, TRAIN_Y + 15, 12);
       ctx.fillStyle = '#121315';
       ctx.fill();
     }
-    smoke(ctx, x0 + 51, TRAIN_Y - 34, t, 0);
+    smoke(ctx, locoX + 12, TRAIN_Y - 32, t, 0);
     ctx.fillStyle = C.text;
     ctx.font = '800 13px system-ui, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('WAREHOUSE', a.x + 115, a.y + 120);
+    ctx.fillText('WAREHOUSE', a.x + a.w / 2, a.y + 120);
     ctx.fillStyle = C.dim;
     ctx.font = '12px system-ui, sans-serif';
-    ctx.fillText(`${this.archivedCount} archived`, a.x + 115, a.y + 138);
-    ctx.fillText('click to browse', a.x + 115, a.y + 156);
+    ctx.fillText(`${this.archivedCount} archived`, a.x + a.w / 2, a.y + 138);
+    ctx.fillText('click to browse', a.x + a.w / 2, a.y + 156);
   }
 
   private drawCrate(ctx: CanvasRenderingContext2D, c: CrateView, s: Sprite, hover: boolean, selected: boolean): void {
@@ -395,6 +490,14 @@ export class Scene {
     const off = this.pileOffset(s);
     const x = Math.round(off.x - CRATE_W / 2);
     const y = Math.round(off.y - CRATE_H / 2);
+    if (s.loading !== undefined) {
+      const load = Math.min(1, s.loading / LOAD_SECONDS);
+      ctx.save();
+      ctx.globalAlpha = 1 - load;
+      fillSquircle(ctx, x + load * 10, y + load * LOAD_DROP, CRATE_W - load * 20, CRATE_H - load * 14, RADIUS.crate, crateColor(c.id, 45));
+      ctx.restore();
+      return;
+    }
     const cx = x + CRATE_W / 2;
     const parked = c.zone === 'storage' && !moving;
     const buried = !moving && s.pileRank > 0;
@@ -721,7 +824,7 @@ function plant(g: CanvasRenderingContext2D, x: number, y: number, rnd: () => num
 }
 
 /** Title plates sit clear of the belts that enter each foundation. */
-const TITLE_INSET: Partial<Record<Area, number>> = { freight: 52, dock: 62, storage: 48 };
+const TITLE_INSET: Partial<Record<Area, number>> = { dock: 62, storage: 48 };
 
 function foundation(g: CanvasRenderingContext2D, key: Area, a: (typeof AREAS)[Area]): void {
   g.save();
@@ -760,9 +863,9 @@ function foundation(g: CanvasRenderingContext2D, key: Area, a: (typeof AREAS)[Ar
   squirclePath(g, a.x + 1.5, a.y + 1.5, a.w - 3, a.h - 3, RADIUS.large - 1);
   g.stroke();
 
-  const left = a.x + (TITLE_INSET[key] ?? 16);
   g.font = '800 13px system-ui, sans-serif';
   const tw = g.measureText(a.title).width;
+  const left = a.w < 250 ? a.x + (a.w - tw - 20) / 2 : a.x + (TITLE_INSET[key] ?? 16);
   fillSquircle(g, left, a.y + 12, tw + 20, 24, RADIUS.small, C.orange);
   g.fillStyle = '#1a1208';
   g.textAlign = 'left';
@@ -810,4 +913,32 @@ function addSquircle(p: Path2D, x: number, y: number, w: number, h: number, r: n
   p.lineTo(x, y + r);
   p.bezierCurveTo(x, y + k, x + k, y, x + r, y);
   p.closePath();
+}
+
+/** Loading gantry straddling the freight belt and the wagon below it; the hook drops while a crate is loaded. */
+function drawGantry(ctx: CanvasRenderingContext2D, busy: boolean): void {
+  const { x, y } = FREIGHT_LOAD;
+  const top = y - 30;
+  const bottom = TRAIN_Y + 22;
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.4)';
+  ctx.shadowBlur = 6;
+  ctx.shadowOffsetY = 4;
+  for (const px of [x - 56, x + 50]) fillSquircle(ctx, px, top, 6, bottom - top, 2, '#5b5f66');
+  fillSquircle(ctx, x - 58, top - 6, 116, 10, RADIUS.small, C.orangeDark);
+  ctx.restore();
+  fillSquircle(ctx, x - 58, top - 6, 116, 3, 1.5, C.orange);
+  fillSquircle(ctx, x - 12, top - 9, 24, 16, RADIUS.small, '#3a3e45');
+  if (busy) {
+    ctx.strokeStyle = '#9ca3af';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x, top + 7);
+    ctx.lineTo(x, y - CRATE_H / 2 + 2);
+    ctx.stroke();
+  }
+  ctx.fillStyle = C.dim;
+  ctx.font = '700 9px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('LOADING', x, top - 12);
 }
