@@ -136,6 +136,18 @@ describe('floor placement', () => {
   });
 });
 
+describe('screen bounds', () => {
+  it('keeps every belt, and any crate riding it, on screen', async () => {
+    const { W, CRATE_W } = await import('../web/layout');
+    for (const t of ALL_TRACKS) {
+      for (const p of t.pts) {
+        expect(p.x - CRATE_W / 2).toBeGreaterThanOrEqual(0);
+        expect(p.x + CRATE_W / 2).toBeLessThanOrEqual(W);
+      }
+    }
+  });
+});
+
 describe('freight station layout', () => {
   it('centres the belt stop, the wagon and the crane on the platform, with rails clear of the belt legs', async () => {
     const { AREAS } = await import('../web/layout');
@@ -145,8 +157,9 @@ describe('freight station layout', () => {
     expect(FREIGHT.transfer.x).toBe(centre);
     expect(FREIGHT.wagon.x).toBe(centre);
     expect((FREIGHT.rails.left + FREIGHT.rails.right) / 2).toBe(centre);
-    expect(FREIGHT.rails.left - 4 - (FREIGHT.outX + 15)).toBeGreaterThanOrEqual(4);
-    expect(FREIGHT.inX - 15 - (FREIGHT.rails.right + 4)).toBeGreaterThanOrEqual(4);
+    for (const rail of [FREIGHT.rails.left, FREIGHT.rails.right]) {
+      for (const leg of [FREIGHT.inX, FREIGHT.outX]) expect(Math.abs(rail - leg) - 4 - 15).toBeGreaterThanOrEqual(4);
+    }
   });
 
   it('archived crates are craned from the belt into the wagon', () => {
@@ -162,8 +175,9 @@ describe('storage yard layout', () => {
     expect((YARD.inX + YARD.outX) / 2).toBe(centre);
     const beltHalfWidth = 15;
     const railHalfWidth = 4;
-    expect(YARD.outX - beltHalfWidth - (YARD.rails.left + railHalfWidth)).toBeGreaterThanOrEqual(4);
-    expect(YARD.rails.right - railHalfWidth - (YARD.inX + beltHalfWidth)).toBeGreaterThanOrEqual(4);
+    for (const rail of [YARD.rails.left, YARD.rails.right]) {
+      for (const leg of [YARD.inX, YARD.outX]) expect(Math.abs(rail - leg) - railHalfWidth - beltHalfWidth).toBeGreaterThanOrEqual(4);
+    }
     expect(YARD.pickup.x).toBe(centre);
   });
 });

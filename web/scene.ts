@@ -348,7 +348,7 @@ export class Scene {
     for (const j of JUNCTIONS) junction(ctx, j);
     this.drawHopper(ctx, opts.terminals);
     this.drawTrain(ctx, t);
-    drawOperator(ctx);
+    drawOperator(ctx, t);
 
     const machines = this.machineStates();
     machines.forEach((m) => machineBack(ctx, m.pos, t, m.index, m.crate));
@@ -447,14 +447,10 @@ export class Scene {
       ctx.fill();
     }
     smoke(ctx, locoX + 12, TRAIN_Y - 32, t, 0);
-    ctx.fillStyle = C.text;
-    ctx.font = '800 13px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('WAREHOUSE', a.x + a.w / 2, a.y + 120);
     ctx.fillStyle = C.dim;
-    ctx.font = '12px system-ui, sans-serif';
-    ctx.fillText(`${this.archivedCount} archived`, a.x + a.w / 2, a.y + 138);
-    ctx.fillText('click to browse', a.x + a.w / 2, a.y + 156);
+    ctx.font = '600 11px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${this.archivedCount} archived · click to browse`, a.x + a.w / 2, a.y + a.h - 12);
   }
 
   private drawCrate(ctx: CanvasRenderingContext2D, c: CrateView, s: Sprite, hover: boolean, selected: boolean): void {
@@ -662,10 +658,35 @@ function smoke(ctx: CanvasRenderingContext2D, x: number, y: number, t: number, s
   }
 }
 
-function drawOperator(ctx: CanvasRenderingContext2D): void {
+function drawOperator(ctx: CanvasRenderingContext2D, t: number): void {
   const { x, y } = OPERATOR;
-  fillSquircle(ctx, x - 34, y + 14, 68, 22, RADIUS.small, '#3a3026');
-  fillSquircle(ctx, x - 26, y + 17, 24, 10, RADIUS.small, '#5bc0eb');
+  // Workbench beside the operator: light metal so it reads against the floor, with a terminal and a mug.
+  const bx = x + 20;
+  const by = y - 18;
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.5)';
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetY = 3;
+  fillSquircle(ctx, bx, by, 78, 38, RADIUS.small, '#8b939e');
+  ctx.restore();
+  fillSquircle(ctx, bx, by, 78, 4, 2, C.orange);
+  fillSquircle(ctx, bx + 6, by + 9, 34, 22, 3, '#0e1512');
+  ctx.fillStyle = '#4ade80';
+  for (const [w, row] of [[22, 0], [16, 1], [26, 2]] as const) ctx.fillRect(bx + 10, by + 13 + row * 6, w, 2);
+  // Coffee mug: white with an orange band, coffee inside, a handle, and a little steam.
+  const mx = bx + 58;
+  const my = by + 20;
+  fillSquircle(ctx, mx + 7, my - 3, 6, 6, 2, '#e7e5e4');
+  fillSquircle(ctx, mx - 7, my - 7, 14, 14, 5, '#f5f5f4');
+  fillSquircle(ctx, mx - 7, my - 1, 14, 4, 1.5, C.orange);
+  fillSquircle(ctx, mx - 4.5, my - 4.5, 9, 6, 3, '#5b3418');
+  for (let k = 0; k < 2; k++) {
+    const phase = (t / 2600 + k / 2) % 1;
+    const size = 4 + phase * 5;
+    squirclePath(ctx, mx - size / 2 + Math.sin(phase * 6 + k) * 2, my - 10 - phase * 16, size, size, size * 0.4);
+    ctx.fillStyle = `rgba(230,230,230,${0.35 * (1 - phase)})`;
+    ctx.fill();
+  }
   fillSquircle(ctx, x - 12, y - 10, 24, 26, RADIUS.medium, '#2563eb');
   fillSquircle(ctx, x - 9, y - 26, 18, 18, RADIUS.medium, '#f1c27d');
   // Hard hat: a domed shell over the top of the head, a raised centre ridge, and a slim front peak.
@@ -862,7 +883,7 @@ function plant(g: CanvasRenderingContext2D, x: number, y: number, rnd: () => num
 }
 
 /** Title plates sit clear of the belts that enter each foundation. */
-const TITLE_INSET: Partial<Record<Area, number>> = { dock: 62, storage: 64 };
+const TITLE_INSET: Partial<Record<Area, number>> = { dock: 62, storage: 104 };
 
 function foundation(g: CanvasRenderingContext2D, key: Area, a: (typeof AREAS)[Area]): void {
   g.save();

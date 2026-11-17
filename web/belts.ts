@@ -155,14 +155,18 @@ export interface ZoneNet {
   junctions: Point[];
 }
 
+/** Loop ends sit far enough in that a crate rounding the bend stays on screen (half a crate is 59px). */
+export const LOOP_LEFT = 64;
+export const LOOP_RIGHT = 1536;
+
 /** The main loop runs clockwise: top lane flows right, bottom lane flows left. */
 export const LOOP = new Track(
   rounded(
     [
-      { x: 12, y: LANE_TOP },
-      { x: 1588, y: LANE_TOP },
-      { x: 1588, y: LANE_BOTTOM },
-      { x: 12, y: LANE_BOTTOM },
+      { x: LOOP_LEFT, y: LANE_TOP },
+      { x: LOOP_RIGHT, y: LANE_TOP },
+      { x: LOOP_RIGHT, y: LANE_BOTTOM },
+      { x: LOOP_LEFT, y: LANE_BOTTOM },
     ],
     25,
     true,
@@ -250,7 +254,7 @@ function trackSlots(track: Track, positions: Point[]): TrackSlot[] {
 
 const TOP_BUS = 220;
 const TOP_ROWS = [148, 292];
-export const MACHINE_COLUMNS = [450, 682, 914, 1146, 1378];
+export const MACHINE_COLUMNS = [450, 675, 900, 1125, 1350];
 
 export const HOPPER_DROP: Point = { x: 145, y: 196 };
 export const DOCK_FRONT_X = 440;
@@ -285,8 +289,8 @@ function dockLine(): ZoneNet {
  */
 export const FREIGHT = {
   busY: 700,
-  inX: 230,
-  outX: 60,
+  inX: 177,
+  outX: 113,
   transfer: { x: 145, y: 700 },
   wagon: { x: 145, y: 796 },
   rails: { left: 87, right: 203, top: 680, bottom: 830 },
@@ -297,15 +301,15 @@ export const FREIGHT = {
 export const YARD = {
   busY: 572,
   /** The yard belt's legs sit symmetrically about the platform centre (1365). */
-  inX: 1530,
-  outX: 1200,
+  inX: 1489,
+  outX: 1241,
   /** One transfer point, the middle of the belt through the yard: crates are picked up and set down here. */
   pickup: { x: 1365, y: 572 },
   drop: { x: 1365, y: 572 },
   columns: [1239, 1365, 1491],
   rows: [656, 734, 812],
-  /** Rails stand just outside the belt's legs (belt edges 1185 / 1545) with a small gap. */
-  rails: { left: 1175, right: 1555, top: 552, bottom: 852 },
+  /** Rails stand just outside the belt's legs with a small gap. */
+  rails: { left: 1216, right: 1514, top: 552, bottom: 852 },
   /** Where the crane parks between jobs: between the belt and the first row, under the transfer point. */
   home: { x: 1365, y: 607 },
 };
@@ -323,7 +327,7 @@ function craneYard(track: Track): CraneSlot[] {
 
 export const NET: Record<Area, ZoneNet> = {
   intake: hopperLine(),
-  working: zone(topZoneTrack(310, 1530, TOP_BUS), (t) => TOP_ROWS.flatMap((y) => MACHINE_COLUMNS.map((x) => stubSlot(t, TOP_BUS, { x, y })))),
+  working: zone(topZoneTrack(310, 1485, TOP_BUS), (t) => TOP_ROWS.flatMap((y) => MACHINE_COLUMNS.map((x) => stubSlot(t, TOP_BUS, { x, y })))),
   freight: zone(bottomZoneTrack(FREIGHT.inX, FREIGHT.outX, FREIGHT.busY), freightStation),
   dock: dockLine(),
   storage: zone(bottomZoneTrack(YARD.inX, YARD.outX, YARD.busY), craneYard),
