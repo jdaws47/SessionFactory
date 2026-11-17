@@ -64,3 +64,11 @@ export interface JiraTicket {
   summary: string;
   status: string;
 }
+
+/** A ticket in the hopper, with the session already working on it if there is one. */
+export interface HopperTicket extends JiraTicket {
+  /** Live crate for this ticket (on the floor); the hopper hides these by default. */
+  liveCrateId?: string;
+  /** Most recent archived crate for this ticket, offered for Resume. */
+  archivedCrateId?: string;
+}

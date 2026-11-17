@@ -1,4 +1,4 @@
-import type { CrateView, FactoryState, JiraTicket } from '../src/shared/types';
+import type { CrateView, FactoryState, HopperTicket } from '../src/shared/types';
 import { AlertNotifier } from './alerts';
 import { get, post } from './api';
 import { crateColor } from './scene';
@@ -425,31 +425,67 @@ export class Ui {
     if (s.features.jira) void this.loadTickets(false);
   }
 
+  private showTicketsOnFloor = false;
+
+  /**
+   * Lists assigned tickets. Ones that already have a live session are hidden behind a toggle (Open jumps to
+   * that crate); ones with an archived session offer Resume as well as a fresh start.
+   */
   private async loadTickets(refresh: boolean): Promise<void> {
     const box = document.getElementById('ns-tickets');
     if (!box) return;
     box.innerHTML = '<div class="dim">Loading tickets…</div>';
+    let tickets: HopperTicket[];
     try {
-      const { tickets } = await get<{ tickets: (JiraTicket & { onFloor: boolean })[] }>(`/api/jira/assigned${refresh ? '?refresh=1' : ''}`);
-      if (!document.getElementById('ns-tickets')) return;
-      box.innerHTML = tickets.length
-        ? tickets
-            .map((t) => {
-              const start = this.act(async () => {
-                const { crateId } = await post<{ crateId: string }>(`/api/jira/${encodeURIComponent(t.key)}/start`);
-                this.modal.hidden = true;
-                this.select(crateId);
-              });
-              return `<div class="ticket">
-                <div class="ticket-text"><b>${esc(t.key)}</b> <span class="chip">${esc(t.status)}</span>${t.onFloor ? ' <span class="chip ship">on the floor</span>' : ''}<div>${esc(t.summary)}</div></div>
-                <button class="btn primary" ${start}>Start</button>
-              </div>`;
-            })
-            .join('')
-        : '<div class="dim">No unresolved tickets assigned to you.</div>';
+      ({ tickets } = await get<{ tickets: HopperTicket[] }>(`/api/jira/assigned${refresh ? '?refresh=1' : ''}`));
     } catch (err) {
       box.innerHTML = `<div class="error">Couldn't load tickets: ${esc((err as Error).message)}</div>`;
+      return;
     }
+    if (!document.getElementById('ns-tickets')) return;
+    const close = () => {
+      this.modal.hidden = true;
+    };
+    const start = (t: HopperTicket): Action => ({
+      label: t.archivedCrateId ? 'Start new' : 'Start',
+      kind: t.archivedCrateId ? 'plain' : 'primary',
+      run: async () => {
+        const { crateId } = await post<{ crateId: string }>(`/api/jira/${encodeURIComponent(t.key)}/start`);
+        close();
+        this.select(crateId);
+      },
+    });
+    const row = (t: HopperTicket) => {
+      const actions: Action[] = t.liveCrateId
+        ? [{ label: 'Open', kind: 'primary', run: () => { close(); this.select(t.liveCrateId!); } }]
+        : t.archivedCrateId
+          ? [
+              {
+                label: 'Resume',
+                kind: 'primary',
+                run: async () => {
+                  close();
+                  await this.resume({ id: t.archivedCrateId! } as CrateView);
+                },
+              },
+              start(t),
+            ]
+          : [start(t)];
+      const note = t.liveCrateId ? '<span class="chip ship">on the floor</span>' : t.archivedCrateId ? '<span class="chip">in the warehouse</span>' : '';
+      return `<div class="ticket">
+        <div class="ticket-text"><b>${esc(t.key)}</b> <span class="chip">${esc(t.status)}</span> ${note}<div>${esc(t.summary)}</div></div>
+        <div class="row">${actions.map((a) => this.button(a)).join('')}</div>
+      </div>`;
+    };
+    const render = () => {
+      const live = tickets.filter((t) => t.liveCrateId);
+      const shown = tickets.filter((t) => this.showTicketsOnFloor || !t.liveCrateId);
+      const toggle = live.length
+        ? `<button class="linkish" ${this.act(() => { this.showTicketsOnFloor = !this.showTicketsOnFloor; render(); })}>${this.showTicketsOnFloor ? 'Hide' : 'Show'} ${live.length} already on the floor</button>`
+        : '';
+      box.innerHTML = (shown.length ? shown.map(row).join('') : '<div class="dim">Every assigned ticket already has a session on the floor.</div>') + toggle;
+    };
+    render();
   }
 
   private renderInbox(): void {

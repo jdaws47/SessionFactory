@@ -72,3 +72,10 @@ export class Jira {
     return out;
   }
 }
+
+/** Does this crate belong to the ticket? By detected Jira key, or the key appearing in its name. */
+export function crateMatchesTicket(c: { jiraKey?: string; label: string; title?: string }, key: string): boolean {
+  if (c.jiraKey === key) return true;
+  const word = new RegExp(`(^|[^A-Za-z0-9-])${key}([^0-9]|$)`, 'i');
+  return word.test(c.label) || (!!c.title && word.test(c.title));
+}

@@ -1,12 +1,12 @@
 import path from 'node:path';
 import type { WebSocket } from 'ws';
-import type { Crate, FactoryState } from '../shared/types';
+import type { Crate, FactoryState, HopperTicket } from '../shared/types';
 import { CLAUDE_PROJECTS_DIR, CLEAN_ROOT, DIST_DIR, EVENTS_DIR, HOST, PORT, REGISTRY_FILE, REPO_DIR, RUN_DIR } from './config';
 import { FactoryServer, HttpError } from './http';
 import { handoffBlocker } from './handoff';
 import { scanHistory } from './history';
 import { EventIngestor } from './ingest';
-import { Jira, JIRA_KEY_RE } from './jira';
+import { crateMatchesTicket, Jira, JIRA_KEY_RE } from './jira';
 import { DEFAULT_JIRA_PROJECTS, snippet } from './labels';
 import { Registry } from './registry';
 import { claudeCommand, newSlot, SLOT_RE, Terminals } from './terminals';
@@ -144,8 +144,15 @@ function requireJira(): void {
 app.route('GET', '/api/jira/assigned', async (_b, _p, query) => {
   requireJira();
   const tickets = await jira.assigned(query.get('refresh') === '1');
-  const onFloor = new Set(registry.all().filter((c) => !c.archived && c.jiraKey).map((c) => c.jiraKey));
-  return { tickets: tickets.map((t) => ({ ...t, onFloor: onFloor.has(t.key) })) };
+  const crates = registry.all();
+  return {
+    tickets: tickets.map((t): HopperTicket => {
+      const matching = crates.filter((c) => crateMatchesTicket(c, t.key));
+      const live = matching.filter((c) => !c.archived).sort((a, b) => b.updatedAt - a.updatedAt)[0];
+      const archived = matching.filter((c) => c.archived).sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0))[0];
+      return { ...t, liveCrateId: live?.id, archivedCrateId: live ? undefined : archived?.id };
+    }),
+  };
 });
 
 /** Turn a Jira ticket into a crate: a factory terminal primed with the ticket. */
