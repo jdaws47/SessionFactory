@@ -3,6 +3,7 @@ import type { WebSocket } from 'ws';
 import type { Crate, FactoryState } from '../shared/types';
 import { CLEAN_ROOT, DIST_DIR, EVENTS_DIR, HOST, PORT, REGISTRY_FILE, REPO_DIR, RUN_DIR } from './config';
 import { FactoryServer, HttpError } from './http';
+import { handoffBlocker } from './handoff';
 import { EventIngestor } from './ingest';
 import { Jira, JIRA_KEY_RE } from './jira';
 import { snippet } from './labels';
@@ -97,16 +98,14 @@ app.route('POST', '/api/terminals', (body) =>
   startNew({ label: body.label ? String(body.label) : undefined, prompt: body.prompt ? String(body.prompt) : undefined }),
 );
 
-/** Resume a crate's conversation in a new factory terminal. Refused while it still runs elsewhere. */
+/** Resume (or move) a crate's conversation into a new factory terminal. Refused while it may still be open elsewhere. */
 app.route('POST', '/api/crates/:id/resume', async (_b, { id }) => {
   requireTerminals();
   const crate = crateOr404(id);
   if (liveTerminal(crate)) return { slot: crate.slot };
-  if (crate.pid && crate.zone !== 'storage' && isAlive(crate.pid)) {
-    throw new HttpError(409, 'This session is still running in another terminal.');
-  }
+  const blocked = handoffBlocker(crate, isAlive);
+  if (blocked) throw new HttpError(409, blocked);
   const sessionId = crate.sessionIds[crate.sessionIds.length - 1];
-  if (!sessionId) throw new HttpError(409, 'This crate has no session to resume yet.');
   const slot = newSlot();
   if (crate.archived) registry.unarchive(id, Date.now());
   registry.attachSlot(id, slot);

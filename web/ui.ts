@@ -46,6 +46,7 @@ export class Ui {
   private warehouseQuery = '';
   private archiveMenu = false;
   private fullScreen = false;
+  private moveNotice: { id: string; text: string } | null = null;
   private terminal: AttachedTerminal | null = null;
   private readonly alerts = new AlertNotifier();
   private actionMap = new Map<string, () => void | Promise<void>>();
@@ -105,6 +106,7 @@ export class Ui {
 
   select(id: string | null): void {
     if (id !== this.selected) {
+      this.moveNotice = null;
       this.terminal?.dispose();
       this.terminal = null;
       this.archiveMenu = false;
@@ -338,11 +340,28 @@ export class Ui {
         ${details}
       </div>`;
     }
+    const move = s.features.terminals ? this.button({ label: 'Move to factory', kind: 'primary', run: () => this.moveToFactory(c) }) : '';
+    const notice = this.moveNotice?.id === c.id ? `<div class="notice">${esc(this.moveNotice.text)}</div>` : '';
     return `<div class="cw-empty">
       <h3>Running in another terminal</h3>
-      <p>This session was started outside the factory, so there's no terminal to open here. Sessions started with <b>+ New session</b>, the hopper, or <code>~/clean-room/session-factory/bin/sf</code> open right in this window.</p>
+      <p>This session was started outside the factory, so there's no terminal to open here. <b>Move to factory</b> resumes it in a factory terminal with its full context, once it's closed in the other terminal.</p>
+      ${notice}
+      <div class="row center">${move}</div>
       ${details}
     </div>`;
+  }
+
+  /** Hand a session over from an outside terminal; stops and explains if it still looks open there. */
+  async moveToFactory(c: CrateView): Promise<void> {
+    try {
+      await post(`/api/crates/${c.id}/resume`);
+      this.moveNotice = null;
+      this.toast(`${c.label} moved into a factory terminal`);
+      this.renderWindow();
+    } catch (err) {
+      this.moveNotice = { id: c.id, text: (err as Error).message };
+      this.renderWindow();
+    }
   }
 
   async resume(c: CrateView): Promise<void> {
