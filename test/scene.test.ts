@@ -278,7 +278,11 @@ describe('warehouse layout', () => {
       expect(c.x - 59).toBeGreaterThan(STACKS.rails.left + 4);
       expect(c.x + 59).toBeLessThan(STACKS.rails.right - 4);
       expect(c.y + 28).toBeLessThan(p.y + p.h);
+      // The parked gantry trolley (30px tall) sits above every crate.
+      expect(c.y - 28).toBeGreaterThan(STACKS.home.y + 15);
     }
+    // ...and short of the rail ends, so the supports show past it.
+    expect(STACKS.home.y - 15).toBeGreaterThan(STACKS.rails.top);
     // The train stops clear of the gantry's left rail.
     expect(train.left).toBeGreaterThan(STACKS.rails.left + 10);
   });

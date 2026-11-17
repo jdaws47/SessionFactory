@@ -26,10 +26,10 @@ export const STACKS = {
   platform: PLATFORM,
   /** Rails run the full platform so the gantry reaches every spot (and the train). */
   rails: { left: PLATFORM.x + 24, right: PLATFORM.x + PLATFORM.w - 24, top: PLATFORM.y + 52, bottom: PLATFORM.y + PLATFORM.h - 14 },
-  /** Parks top-left, out of the way. */
-  home: { x: PLATFORM.x + 70, y: PLATFORM.y + 52 },
-  /** Fills the building from the left wall; spots over the train's track are left out (see SPOTS). */
-  field: { x: PLATFORM.x + 44, y: 112, cols: 10, rows: 10, cw: 136, ch: 74 },
+  /** Parks top-left in its own lane above the first row, short of the rail ends so the supports show past it. */
+  home: { x: PLATFORM.x + 70, y: PLATFORM.y + 75 },
+  /** Fills the building from the left wall below the parking lane; spots over the train's track are left out (see SPOTS). */
+  field: { x: PLATFORM.x + 44, y: 130, cols: 10, rows: 10, cw: 136, ch: 70 },
   levels: 1,
   lift: 0,
 };
