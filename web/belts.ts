@@ -299,25 +299,26 @@ export const FREIGHT = {
   outX: 1329,
   transfer: { x: 1406, y: 582 },
   wagon: { x: 1406, y: 676 },
-  rails: { left: 1352, right: 1460, top: 562, bottom: 707 },
+  /** Rails span the whole platform, just outside the belt legs, like the storage crane's. */
+  rails: { left: 1294, right: 1518, top: 552, bottom: 726 },
   home: { x: 1406, y: 629 },
 };
 
 /** Storage yard: belt along the top, crane field below. */
 export const YARD = {
   busY: 582,
-  /** The yard belt's legs sit symmetrically about the yard centre (1105). */
-  inX: 1205,
-  outX: 1005,
+  /** The yard belt's legs sit symmetrically about the yard centre (1093). */
+  inX: 1193,
+  outX: 993,
   /** One transfer point, the middle of the belt through the yard: crates are picked up and set down here. */
-  pickup: { x: 1105, y: 582 },
-  drop: { x: 1105, y: 582 },
-  columns: [1042, 1168],
+  pickup: { x: 1093, y: 582 },
+  drop: { x: 1093, y: 582 },
+  columns: [1030, 1156],
   rows: [662, 740, 818],
   /** Rails stand outside the belt's legs, with clear space between them and any crate in the yard. */
-  rails: { left: 970, right: 1240, top: 562, bottom: 854 },
+  rails: { left: 958, right: 1228, top: 562, bottom: 854 },
   /** Where the crane parks between jobs: between the belt and the first row, under the transfer point. */
-  home: { x: 1105, y: 622 },
+  home: { x: 1093, y: 622 },
 };
 
 function freightStation(track: Track): CraneSlot[] {
