@@ -92,8 +92,10 @@ app.route('POST', '/api/crates/:id/end', async (_b, { id }) => {
 
 app.route('POST', '/api/crates/:id/archive', async (body, { id }) => {
   const crate = crateOr404(id);
-  if (body.endSession) await endSession(crate);
+  // Archive first so the crate heads straight for freight; ending the session (which waits for /exit) follows.
   registry.archive(id, Date.now());
+  broadcast();
+  if (body.endSession) await endSession(crate);
 });
 app.route('POST', '/api/crates/:id/unarchive', (_b, { id }) => {
   crateOr404(id);
