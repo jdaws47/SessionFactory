@@ -239,13 +239,12 @@ export class Ui {
         <dt>In this state</dt><dd>${esc(ago(s.now - c.zoneSince).replace(' ago', ''))}</dd>
         <dt>Started</dt><dd>${esc(new Date(c.startedAt).toLocaleString())}</dd>
         <dt>Turns</dt><dd>${c.turns}</dd>
+        ${c.waitingOn ? `<dt>Waiting on</dt><dd><code>${esc(c.waitingOn)}</code></dd>` : ''}
         ${c.lastTool ? `<dt>Last tool</dt><dd><code>${esc(c.lastTool)}</code></dd>` : ''}
         ${c.jira?.status ? `<dt>Jira</dt><dd>${esc(c.jira.status)}</dd>` : ''}
         <dt>Session</dt><dd><code>${esc(lastSessionId(c) ?? 'not started yet')}</code></dd>
         <dt>Directory</dt><dd><code>${esc(c.cwd)}</code></dd>
       </dl>
-      ${c.firstPrompt ? `<h4>First prompt</h4><p class="quote">${esc(c.firstPrompt)}</p>` : ''}
-      ${c.lastMessage ? `<h4>Last reply</h4><p class="quote">${esc(c.lastMessage)}</p>` : ''}
       <h4>Label</h4>
       <div class="row"><input id="label-input" data-crate="${esc(c.id)}" value="${esc(c.labelSource === 'manual' ? c.label : '')}" placeholder="${esc(c.label)}" /><button class="btn plain" ${saveLabel}>Save</button></div>
       <div class="p-actions">${actions.map((a) => this.button(a)).join('')}</div>`;
@@ -339,8 +338,7 @@ export class Ui {
         ${c.archiveCount > 1 || c.reactivationCount ? `<span class="dim">· round ${c.archiveCount}</span>` : ''}
       </div>
       ${c.returned ? `<div class="returned-badge">returned: ${esc(c.returned.reason)}</div>` : ''}
-      ${c.firstPrompt ? `<p class="quote">${esc(c.firstPrompt)}</p>` : ''}
-      ${c.lastMessage ? `<p class="quote dim">${esc(c.lastMessage)}</p>` : ''}
+      ${c.lastMessage ? `<p class="quote dim clamp">${esc(c.lastMessage)}</p>` : ''}
       <div class="row wrap">${actions.map((a) => this.button(a)).join('')}</div>
     </article>`;
   }

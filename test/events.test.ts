@@ -22,6 +22,14 @@ describe('normalize', () => {
     expect(JSON.stringify(event)).not.toContain('transcript');
   });
 
+  it('describes background work a Stop is paused on', () => {
+    const event = normalize({
+      sf: {},
+      payload: { session_id: 'a', cwd: '/x', hook_event_name: 'Stop', background_tasks: [{ type: 'shell', command: 'npm test' }, { type: 'subagent' }], session_crons: [] },
+    });
+    expect(event?.waitingOn).toBe('shell: npm test +1');
+  });
+
   it('rejects payloads without a session id or cwd', () => {
     expect(normalize({ sf: {}, payload: { hook_event_name: 'Stop' } })).toBeNull();
     expect(normalize(null)).toBeNull();

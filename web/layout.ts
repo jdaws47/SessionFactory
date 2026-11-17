@@ -23,21 +23,20 @@ export interface AreaDef extends Rect {
 
 export const W = 1600;
 export const H = 900;
-export const BELT_Y = 440;
 export const CRATE_W = 62;
 export const CRATE_H = 44;
 
 export const AREAS: Record<Area, AreaDef> = {
-  intake: { x: 30, y: 40, w: 230, h: 340, port: 145, title: 'INTAKE', subtitle: 'new sessions' },
-  working: { x: 290, y: 40, w: 840, h: 340, port: 710, title: 'ASSEMBLY HALL', subtitle: 'claude is working' },
-  alert: { x: 1160, y: 40, w: 410, h: 340, port: 1365, title: 'ALERT BAY', subtitle: 'needs your answer' },
-  freight: { x: 30, y: 500, w: 230, h: 370, port: 145, title: 'FREIGHT', subtitle: 'archive → warehouse' },
-  dock: { x: 290, y: 500, w: 840, h: 370, port: 710, title: 'LOADING DOCK', subtitle: 'waiting on you' },
-  storage: { x: 1160, y: 500, w: 410, h: 370, port: 1365, title: 'STORAGE', subtitle: 'session ended' },
+  intake: { x: 30, y: 36, w: 230, h: 334, port: 145, title: 'INTAKE', subtitle: 'new sessions' },
+  working: { x: 290, y: 36, w: 840, h: 334, port: 710, title: 'ASSEMBLY HALL', subtitle: 'claude is working' },
+  alert: { x: 1160, y: 36, w: 410, h: 334, port: 1365, title: 'ALERT BAY', subtitle: 'needs you' },
+  freight: { x: 30, y: 510, w: 230, h: 360, port: 145, title: 'FREIGHT', subtitle: 'to warehouse' },
+  dock: { x: 290, y: 510, w: 840, h: 360, port: 710, title: 'LOADING DOCK', subtitle: 'waiting on you' },
+  storage: { x: 1160, y: 510, w: 410, h: 360, port: 1365, title: 'STORAGE', subtitle: 'session ended' },
 };
 
 export const HOPPER: Rect = { x: AREAS.intake.x + 55, y: AREAS.intake.y + 44, w: 120, h: 86 };
-export const TRAIN_Y = AREAS.freight.y + 300;
+export const TRAIN_Y = AREAS.freight.y + 290;
 
 function grid(area: AreaDef, i: number, cols: number, cellW: number, cellH: number, top: number): Point {
   const usable = cols * cellW;
@@ -78,19 +77,6 @@ export function slotPosition(zone: Zone, i: number, count: number): Point {
     case 'storage':
       return grid(AREAS.storage, i, 4, 96, 80, 56);
   }
-}
-
-/** Route along feeder belts and the main belt from one area to another. */
-export function beltPath(from: Point, fromArea: Area, toArea: Area, target: Point): Point[] {
-  const a = AREAS[fromArea];
-  const b = AREAS[toArea];
-  return [
-    { x: a.port, y: from.y },
-    { x: a.port, y: BELT_Y },
-    { x: b.port, y: BELT_Y },
-    { x: b.port, y: target.y },
-    target,
-  ];
 }
 
 export function inRect(p: Point, r: Rect): boolean {

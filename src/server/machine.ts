@@ -29,6 +29,7 @@ export function newCrate(ev: FactoryEvent, cleanRoot: string, id: string): Crate
 /** Pure transition: returns the crate after one hook event. */
 export function applyEvent(crate: Crate, ev: FactoryEvent, jiraProjects?: string[]): Crate {
   const next: Crate = { ...crate, updatedAt: ev.at };
+  if (ev.kind !== 'stop' && ev.kind !== 'notify') next.waitingOn = undefined;
   if (ev.pid) next.pid = ev.pid;
   if (!next.sessionIds.includes(ev.sessionId)) next.sessionIds = [...next.sessionIds, ev.sessionId];
 
@@ -48,6 +49,7 @@ export function applyEvent(crate: Crate, ev: FactoryEvent, jiraProjects?: string
       break;
     case 'prompt': {
       next.endedAt = undefined;
+      if (ev.title) next.title = ev.title;
       const prompt = ev.prompt ? snippet(ev.prompt, 400) : undefined;
       if (prompt && !next.firstPrompt) next.firstPrompt = prompt;
       if (prompt) next.lastPrompt = prompt;
@@ -66,12 +68,13 @@ export function applyEvent(crate: Crate, ev: FactoryEvent, jiraProjects?: string
     case 'notify':
       if (ev.notificationType === 'permission_prompt') moveTo('alert', 'permission');
       else if (ev.notificationType && INPUT_NOTIFICATIONS.has(ev.notificationType)) moveTo('alert', 'input needed');
-      else if (ev.notificationType === 'idle_prompt' && (next.zone === 'working' || next.zone === 'alert')) moveTo('dock');
+      else if (ev.notificationType === 'idle_prompt' && !next.waitingOn && (next.zone === 'working' || next.zone === 'alert')) moveTo('dock');
       break;
     case 'stop':
       next.turns += 1;
       if (ev.lastMessage) next.lastMessage = snippet(ev.lastMessage, 600);
-      moveTo('dock');
+      next.waitingOn = ev.waitingOn;
+      moveTo(ev.waitingOn ? 'working' : 'dock');
       break;
     case 'end':
       next.endedAt = ev.at;

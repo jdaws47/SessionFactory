@@ -30,18 +30,21 @@ export function snippet(text: string, max: number): string {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
-/** Recomputes an automatic label in place; manual and Jira labels stay put. */
+/**
+ * Recomputes the label in place. Priority: manual > session name (/rename, --name) > Jira key > automatic.
+ * The Jira key is tracked separately either way.
+ */
 export function refreshLabel(crate: Crate, projects: string[] = DEFAULT_JIRA_PROJECTS): void {
+  crate.jiraKey ??= findJiraKey(crate.title, projects) ?? findJiraKey(crate.firstPrompt, projects);
   if (crate.labelSource === 'manual') return;
-  const key = crate.jiraKey ?? findJiraKey(crate.title, projects) ?? findJiraKey(crate.firstPrompt, projects);
-  if (key) {
-    crate.jiraKey = key;
-    crate.label = key;
+  if (crate.title) {
+    crate.label = crate.title;
+    crate.labelSource = 'auto';
+  } else if (crate.jiraKey) {
+    crate.label = crate.jiraKey;
     crate.labelSource = 'jira';
-    return;
+  } else {
+    crate.labelSource = 'auto';
+    crate.label = crate.firstPrompt ? `${crate.repo}: ${snippet(crate.firstPrompt, 32)}` : `${crate.repo} session`;
   }
-  crate.labelSource = 'auto';
-  if (crate.title) crate.label = crate.title;
-  else if (crate.firstPrompt) crate.label = `${crate.repo}: ${snippet(crate.firstPrompt, 32)}`;
-  else crate.label = `${crate.repo} session`;
 }

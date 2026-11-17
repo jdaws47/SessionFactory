@@ -27,6 +27,8 @@ export interface Crate {
   zoneSince: number;
   alertReason?: string;
   lastTool?: string;
+  /** Set while a finished turn is paused on background work; the crate stays in a machine. */
+  waitingOn?: string;
   firstPrompt?: string;
   lastPrompt?: string;
   lastMessage?: string;

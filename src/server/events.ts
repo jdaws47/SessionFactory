@@ -14,6 +14,21 @@ export interface FactoryEvent {
   message?: string;
   lastMessage?: string;
   reason?: string;
+  /** Background work the session is paused on at Stop (shell, subagent, monitor, scheduled wakeup...). */
+  waitingOn?: string;
+}
+
+function describeBackground(payload: Record<string, unknown>): string | undefined {
+  const tasks = Array.isArray(payload.background_tasks) ? (payload.background_tasks as Record<string, unknown>[]) : [];
+  const crons = Array.isArray(payload.session_crons) ? payload.session_crons : [];
+  if (tasks.length) {
+    const t = tasks[0];
+    const what = str(t.type) ?? 'task';
+    const detail = str(t.description) ?? str(t.command) ?? str(t.agent_type) ?? str(t.name);
+    const more = tasks.length > 1 ? ` +${tasks.length - 1}` : '';
+    return `${what}${detail ? `: ${detail.slice(0, 60)}` : ''}${more}`;
+  }
+  return crons.length ? 'scheduled wakeup' : undefined;
 }
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.length > 0 ? v : undefined);
@@ -33,7 +48,7 @@ export function normalize(raw: unknown): FactoryEvent | null {
     case 'SessionStart':
       return { ...base, kind: 'start', source: str(payload.source), title: str(payload.session_title) };
     case 'UserPromptSubmit':
-      return { ...base, kind: 'prompt', prompt: str(payload.prompt) };
+      return { ...base, kind: 'prompt', prompt: str(payload.prompt), title: str(payload.session_title) };
     case 'PreToolUse':
       return { ...base, kind: 'preTool', tool: str(payload.tool_name) };
     case 'PostToolUse':
@@ -41,7 +56,7 @@ export function normalize(raw: unknown): FactoryEvent | null {
     case 'Notification':
       return { ...base, kind: 'notify', notificationType: str(payload.notification_type), message: str(payload.message) };
     case 'Stop':
-      return { ...base, kind: 'stop', lastMessage: str(payload.last_assistant_message) };
+      return { ...base, kind: 'stop', lastMessage: str(payload.last_assistant_message), waitingOn: describeBackground(payload) };
     case 'SessionEnd':
       return { ...base, kind: 'end', reason: str(payload.reason) };
     default:

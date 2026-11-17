@@ -55,6 +55,15 @@ describe('zone state machine', () => {
     expect(crate.lastMessage).toBe('done');
   });
 
+  it('a turn paused on background work stays in a machine until the final stop', () => {
+    const paused = run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', waitingOn: 'shell: npm test' });
+    expect(paused.zone).toBe('working');
+    expect(paused.waitingOn).toBe('shell: npm test');
+    const done = run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', waitingOn: 'shell' }, { kind: 'postTool', tool: 'Bash' }, { kind: 'stop' });
+    expect(done.zone).toBe('dock');
+    expect(done.waitingOn).toBeUndefined();
+  });
+
   it('an idle reminder does not pull a fresh session out of intake', () => {
     const crate = run({ kind: 'start', source: 'startup' }, { kind: 'notify', notificationType: 'idle_prompt' });
     expect(crate.zone).toBe('intake');
@@ -106,6 +115,12 @@ describe('labels', () => {
     let crate: Crate = { ...newCrate(first, CLEAN_ROOT, 'c1'), label: 'mine', labelSource: 'manual' };
     crate = applyEvent(crate, ev({ kind: 'prompt', prompt: 'PORT-1 stuff' }));
     expect(crate.label).toBe('mine');
+  });
+
+  it('follows the session name, including a /rename picked up on the next prompt', () => {
+    const crate = run({ kind: 'start', title: 'gamify-work' }, { kind: 'prompt', prompt: 'TF-735 go', title: 'factory' });
+    expect(crate.label).toBe('factory');
+    expect(crate.jiraKey).toBe('TF-735');
   });
 
   it('uses the workspace root name for sessions started at the root', () => {

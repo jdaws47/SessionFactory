@@ -11,6 +11,7 @@ const scene = new Scene();
 let state: FactoryState | null = null;
 let hover: string | null = null;
 let scale = 1;
+let pixelRatio = 1;
 
 export const ui = new Ui(() => undefined);
 export const handlers = {
@@ -26,7 +27,8 @@ function resize(): void {
   canvas.style.height = `${H * scale}px`;
   canvas.width = Math.round(W * scale * dpr);
   canvas.height = Math.round(H * scale * dpr);
-  ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+  pixelRatio = scale * dpr;
+  ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
 }
 
 function toFloor(e: MouseEvent): Point {
@@ -61,7 +63,7 @@ function frame(t: number): void {
   const dt = Math.min(0.1, (t - last) / 1000);
   last = t;
   scene.update(dt);
-  scene.draw(ctx, t, { hover, selected: ui.selectedId, terminals: !!state?.features.terminals });
+  scene.draw(ctx, t, { hover, selected: ui.selectedId, terminals: !!state?.features.terminals, pixelRatio });
   requestAnimationFrame(frame);
 }
 
