@@ -1,6 +1,6 @@
 import type { CrateView } from '../src/shared/types';
 import { ALL_TRACKS, BELT_SPEED, FREIGHT, fromHopper, HOPPER_DROP, JUNCTIONS, LOOP, NET, type SlotRef, type Track, travel, type Waypoint, YARD } from './belts';
-import { AREAS, type Area, CRATE_H, CRATE_W, floorArea, H, HOPPER, OPERATOR, type Point, TRAIN_Y, W } from './layout';
+import { AREAS, type Area, CRATE_H, CRATE_W, floorArea, H, HOPPER, MACHINE_H, MACHINE_W, OPERATOR, type Point, TRAIN_Y, W } from './layout';
 import { Crane } from './crane';
 import { reorderQueue } from './queue';
 import { squircleAt, squirclePath } from './shapes';
@@ -359,8 +359,28 @@ export class Scene {
     }
 
     machines.forEach((m) => machineFront(ctx, m.pos, t, m.crate));
+    this.drawJamTag(ctx);
     drawCrane(ctx, this.cranes.storage, YARD.rails);
     drawCrane(ctx, this.cranes.freight, FREIGHT.rails);
+  }
+
+  /** Live tag beside the assembly hall title, only while some machine is jammed waiting on you. */
+  private drawJamTag(ctx: CanvasRenderingContext2D): void {
+    const jammed = [...this.crates.values()].filter((c) => !c.archived && c.zone === 'alert').length;
+    if (!jammed) return;
+    const a = AREAS.working;
+    ctx.font = '800 13px system-ui, sans-serif';
+    const titleW = ctx.measureText(a.title).width;
+    ctx.font = '12px system-ui, sans-serif';
+    const subW = ctx.measureText(a.subtitle).width;
+    const left = a.x + 16 + titleW + 30 + subW + 14;
+    const label = `${jammed} jammed · need${jammed === 1 ? 's' : ''} you`;
+    ctx.font = '800 11px system-ui, sans-serif';
+    const w = ctx.measureText(label).width + 16;
+    fillSquircle(ctx, left, a.y + 13, w, 22, RADIUS.small, C.alert);
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'left';
+    ctx.fillText(label, left + 8, a.y + 28);
   }
 
   private machineStates(): { pos: Point; index: number; crate?: CrateView }[] {
@@ -660,22 +680,37 @@ function smoke(ctx: CanvasRenderingContext2D, x: number, y: number, t: number, s
 
 function drawOperator(ctx: CanvasRenderingContext2D, t: number): void {
   const { x, y } = OPERATOR;
-  // Workbench beside the operator: light metal so it reads against the floor, with a terminal and a mug.
+  // Workbench beside the operator, light metal so it reads against the floor.
   const bx = x + 20;
-  const by = y - 18;
+  const by = y - 10;
   ctx.save();
   ctx.shadowColor = 'rgba(0,0,0,0.5)';
   ctx.shadowBlur = 8;
   ctx.shadowOffsetY = 3;
-  fillSquircle(ctx, bx, by, 78, 38, RADIUS.small, '#8b939e');
+  fillSquircle(ctx, bx, by, 104, 36, RADIUS.small, '#8b939e');
   ctx.restore();
-  fillSquircle(ctx, bx, by, 78, 4, 2, C.orange);
-  fillSquircle(ctx, bx + 6, by + 9, 34, 22, 3, '#0e1512');
+  fillSquircle(ctx, bx, by, 104, 4, 2, C.orange);
+  // Retro beige desktop: keyboard base with a chunky CRT monitor sitting on it.
+  const beige = '#d9cfb4';
+  const beigeDark = '#b9ad8f';
+  fillSquircle(ctx, bx + 6, by + 14, 62, 20, 3, beigeDark);
+  fillSquircle(ctx, bx + 6, by + 12, 62, 18, 3, beige);
+  ctx.fillStyle = '#9b9177';
+  for (let row = 0; row < 3; row++) for (let k = 0; k < 9; k++) ctx.fillRect(bx + 11 + k * 6, by + 16 + row * 4, 4, 2);
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.45)';
+  ctx.shadowBlur = 6;
+  ctx.shadowOffsetY = 3;
+  fillSquircle(ctx, bx + 12, by - 30, 50, 42, 5, beige);
+  ctx.restore();
+  fillSquircle(ctx, bx + 12, by + 6, 50, 6, 2, beigeDark);
+  fillSquircle(ctx, bx + 17, by - 25, 40, 29, 6, '#0b120d');
   ctx.fillStyle = '#4ade80';
-  for (const [w, row] of [[22, 0], [16, 1], [26, 2]] as const) ctx.fillRect(bx + 10, by + 13 + row * 6, w, 2);
+  for (const [w, row] of [[26, 0], [18, 1], [30, 2]] as const) ctx.fillRect(bx + 22, by - 20 + row * 6, w, 2);
+  if (Math.floor(t / 530) % 2 === 0) ctx.fillRect(bx + 22, by - 2, 4, 3);
   // Coffee mug: white with an orange band, coffee inside, a handle, and a little steam.
-  const mx = bx + 58;
-  const my = by + 20;
+  const mx = bx + 88;
+  const my = by + 18;
   fillSquircle(ctx, mx + 7, my - 3, 6, 6, 2, '#e7e5e4');
   fillSquircle(ctx, mx - 7, my - 7, 14, 14, 5, '#f5f5f4');
   fillSquircle(ctx, mx - 7, my - 1, 14, 4, 1.5, C.orange);
@@ -695,8 +730,6 @@ function drawOperator(ctx: CanvasRenderingContext2D, t: number): void {
   fillSquircle(ctx, x - 12, y - 20, 24, 3, 1.5, '#d97706');
 }
 
-const MACHINE_W = 148;
-const MACHINE_H = 76;
 const TOP_ROW_Y = 148;
 
 type MachineMode = 'idle' | 'working' | 'jammed';

@@ -136,6 +136,42 @@ describe('floor placement', () => {
   });
 });
 
+describe('platforms', () => {
+  it('size themselves around their contents, stay on screen, and keep their headers clear of the loop', async () => {
+    const { AREAS, W, H } = await import('../web/layout');
+    for (const [name, a] of Object.entries(AREAS)) {
+      expect(a.x, name).toBeGreaterThanOrEqual(0);
+      expect(a.y, name).toBeGreaterThanOrEqual(0);
+      expect(a.x + a.w, name).toBeLessThanOrEqual(W);
+      expect(a.y + a.h, name).toBeLessThanOrEqual(H);
+      const above = a.y < LANE_TOP;
+      if (above) expect(a.y + a.h, name).toBeLessThanOrEqual(LANE_TOP - 15);
+      else expect(a.y, name).toBeGreaterThanOrEqual(LANE_BOTTOM + 15);
+    }
+  });
+
+  it('do not overlap each other', async () => {
+    const { AREAS } = await import('../web/layout');
+    const list = Object.entries(AREAS);
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const [na, a] = list[i];
+        const [nb, b] = list[j];
+        const apart = a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
+        expect(apart, `${na} / ${nb}`).toBe(true);
+      }
+    }
+  });
+
+  it('centre the assembly hall on its machines', async () => {
+    const { AREAS } = await import('../web/layout');
+    const { MACHINE_COLUMNS } = await import('../web/belts');
+    const hall = AREAS.working;
+    const machinesCentre = (MACHINE_COLUMNS[0] + MACHINE_COLUMNS[MACHINE_COLUMNS.length - 1]) / 2;
+    expect(Math.abs(hall.x + hall.w / 2 - machinesCentre)).toBeLessThanOrEqual(5);
+  });
+});
+
 describe('screen bounds', () => {
   it('keeps every belt, and any crate riding it, on screen', async () => {
     const { W, CRATE_W } = await import('../web/layout');
@@ -149,10 +185,9 @@ describe('screen bounds', () => {
 });
 
 describe('freight station layout', () => {
-  it('centres the belt stop, the wagon and the crane on the platform, with rails clear of the belt legs', async () => {
-    const { AREAS } = await import('../web/layout');
+  it('centres the belt stop, the wagon and the crane between the belt legs, with rails clear of them', async () => {
     const { FREIGHT } = await import('../web/belts');
-    const centre = AREAS.freight.x + AREAS.freight.w / 2;
+    const centre = (FREIGHT.inX + FREIGHT.outX) / 2;
     expect((FREIGHT.inX + FREIGHT.outX) / 2).toBe(centre);
     expect(FREIGHT.transfer.x).toBe(centre);
     expect(FREIGHT.wagon.x).toBe(centre);
@@ -169,10 +204,10 @@ describe('freight station layout', () => {
 });
 
 describe('storage yard layout', () => {
-  it('centres the yard belt on the platform and keeps the crane rails clear of it', async () => {
-    const { AREAS } = await import('../web/layout');
-    const centre = AREAS.storage.x + AREAS.storage.w / 2;
-    expect((YARD.inX + YARD.outX) / 2).toBe(centre);
+  it('centres the yard on its belt and keeps the crane rails clear of the belt legs', () => {
+    const centre = (YARD.inX + YARD.outX) / 2;
+    expect(YARD.columns[1]).toBe(centre);
+    expect((YARD.rails.left + YARD.rails.right) / 2).toBe(centre);
     const beltHalfWidth = 15;
     const railHalfWidth = 4;
     for (const rail of [YARD.rails.left, YARD.rails.right]) {
