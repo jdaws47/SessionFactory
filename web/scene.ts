@@ -1051,7 +1051,11 @@ function paintScenery(g: CanvasRenderingContext2D): void {
       const q = t.at(t.project(p));
       return Math.hypot(q.x - p.x, q.y - p.y) > 22;
     });
-  const clear = (p: Point) => p.y > 8 && !areas.some((a) => p.x > a.x && p.x < a.x + a.w && p.y > a.y && p.y < a.y + a.h) && offBelts(p);
+  // Plants root this far from any platform; deeper below one, since fronds grow upward into it.
+  const SIDE = 12;
+  const BELOW = 24;
+  const nearPlatform = (p: Point) => areas.some((a) => p.x > a.x - SIDE && p.x < a.x + a.w + SIDE && p.y > a.y - SIDE && p.y < a.y + a.h + BELOW);
+  const clear = (p: Point) => p.y > 8 && !nearPlatform(p) && offBelts(p);
   const plants: Point[] = [];
   for (let i = 0; i < 2400; i++) {
     const p = { x: rnd() * W, y: rnd() * H };
