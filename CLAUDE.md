@@ -25,6 +25,9 @@ npm run typecheck
 
 # Observe-only hooks in clean-room/.claude/settings.local.json
 npm run hooks -- status | install | remove
+
+# Factory terminals from a shell (scrub-in, then claude, on the private tmux server)
+bin/sf | bin/sf ls | bin/sf attach <slot>
 ```
 
 Environment: `SF_PORT` (default 4477), `SF_DATA_DIR` (default `./data`), `SF_JIRA_PROJECTS` (default `PORT,TF,BIOBK,VIDA,DQI`).
@@ -34,6 +37,8 @@ Environment: `SF_PORT` (default 4477), `SF_DATA_DIR` (default `./data`), `SF_JIR
 ```
 hooks/emit-event      Observe-only hook: appends the hook JSON to data/events/, always exits 0, prints nothing
 scripts/hooks.mjs     Install/remove the hooks block; remove restores settings.local.json byte-for-byte
+bin/sf                Start/attach factory terminals from any shell
+tmux.conf             Config for the private tmux server (socket run/tmux.sock)
 src/shared/types.ts   Crate / state types shared by server and web
 src/server/
   events.ts           Hook envelope -> FactoryEvent (drops transcript_path on purpose)
@@ -41,14 +46,19 @@ src/server/
   labels.ts           Repo, Jira-key and label derivation; clean-room boundary check
   registry.ts         Persistent crate store (data/registry.json), session linking, archive, liveness
   ingest.ts           Drains data/events/ into the registry (fs.watch + polling)
+  terminals.ts        tmux bridge: start/kill factory terminals, attach via node-pty; claudeCommand() builds the scrub-in line
   http.ts             Localhost-only HTTP + websocket server (Host/Origin checked)
   main.ts             Wiring, REST routes, state broadcast
 web/
   layout.ts           Fixed 1600x900 floor: areas, slots, belt paths
   scene.ts            Canvas drawing and crate movement along belts
-  ui.ts               Top bar, crate panel, tooltip, warehouse, returned inbox
+  belts.ts            One-way conveyor network: clockwise loop + curved in/out feeders; route() between areas
+  terminal.ts         xterm.js terminal attached to /ws/term/:slot
+  ui.ts               Top bar, crate window (terminal or info), new-session dialog, warehouse, returned inbox
   main.ts             Canvas loop, hit-testing, websocket subscription
 ```
+
+Factory terminals: the server starts `tmux new-session -e SF_SLOT=<slot>` in clean-room and types `scrub-in; cd <clean-room> && claude`. Hooks carry `SF_SLOT`, so the session links to the crate pre-registered for that slot. The browser attaches through `/ws/term/:slot` (a node-pty running `tmux attach`).
 
 State flow: Claude hook → `hooks/emit-event` → `data/events/*.json` → `EventIngestor` → `Registry.ingest` → `applyEvent` → websocket broadcast → `Scene.setCrates`.
 
@@ -75,4 +85,6 @@ npx vitest run test/machine.test.ts
 - **Only Archive takes a crate off the floor.** Process exit, timeouts and Jira status only move a crate to Storage or add a "ready to ship" hint. Nothing deletes crates.
 - **The hooks are observe-only.** `emit-event` must never print, never exit non-zero, and never make a decision.
 - **Never touch other Claude config.** The only allowed config change is the `hooks` key in `clean-room/.claude/settings.local.json`; any other change must be flagged to the user first.
-- **Localhost only.** Bind `127.0.0.1` and keep the Host/Origin checks in `http.ts`.
+- **Localhost only.** Bind `127.0.0.1` and keep the Host/Origin checks in `http.ts`; the terminal websocket is a shell.
+- **Claude only starts from clean-room, after scrub-in.** Every launch goes through `claudeCommand()` or `bin/sf`, and only on a user click.
+- **Never auto-run scrub-in in tests or smoke checks.** It logs out of AWS SSO and switches repos to `main`; test the bridge with a harmless command instead.

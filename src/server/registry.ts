@@ -49,7 +49,7 @@ export class Registry {
   /** Applies a hook event. Returns false for sessions outside clean-room, which are never tracked. */
   ingest(ev: FactoryEvent): boolean {
     if (!isWithin(ev.cwd, this.cleanRoot)) return false;
-    const crate = this.link(ev) ?? newCrate(ev, this.cleanRoot, randomUUID());
+    const crate = this.link(ev) ?? { ...newCrate(ev, this.cleanRoot, randomUUID()), slot: ev.slot };
     this.put(applyEvent(crate, ev, this.jiraProjects));
     return true;
   }

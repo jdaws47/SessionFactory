@@ -49,6 +49,13 @@ describe('session linking', () => {
   });
 });
 
+describe('factory terminals started outside the app', () => {
+  it('a session from an unknown slot gets a crate that remembers the slot', () => {
+    reg.ingest(ev({ kind: 'start', sessionId: 'q', slot: 'sf-abc123' }));
+    expect(reg.findBySlot('sf-abc123')?.sessionIds).toEqual(['q']);
+  });
+});
+
 describe('persistence and lifecycle', () => {
   it('crates survive a restart', () => {
     reg.ingest(ev({ kind: 'prompt', sessionId: 'a', prompt: 'x' }));

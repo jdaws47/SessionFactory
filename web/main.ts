@@ -1,3 +1,4 @@
+import '@xterm/xterm/css/xterm.css';
 import type { FactoryState } from '../src/shared/types';
 import { subscribe } from './api';
 import { AREAS, H, HOPPER, inRect, type Point, W } from './layout';
@@ -13,11 +14,7 @@ let hover: string | null = null;
 let scale = 1;
 let pixelRatio = 1;
 
-export const ui = new Ui(() => undefined);
-export const handlers = {
-  hopperClick: (_s: FactoryState) => {},
-  stateChanged: (_s: FactoryState) => {},
-};
+const ui = new Ui();
 
 function resize(): void {
   const rect = stage.getBoundingClientRect();
@@ -54,7 +51,7 @@ canvas.addEventListener('click', (e) => {
   const id = scene.hit(p);
   if (id) ui.select(id);
   else if (inRect(p, AREAS.freight)) ui.openWarehouse();
-  else if (state && inRect(p, HOPPER)) handlers.hopperClick(state);
+  else if (state?.features.terminals && inRect(p, HOPPER)) ui.openNewSession();
   else ui.select(null);
 });
 
@@ -72,7 +69,6 @@ subscribe(
     state = s;
     scene.setCrates(s.crates, s.now);
     ui.setState(s);
-    handlers.stateChanged(s);
   },
   (up) => ui.setConnected(up),
 );
