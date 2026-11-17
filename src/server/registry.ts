@@ -216,7 +216,7 @@ export class Registry {
     return this.all().map((c) => {
       let readyToShip: string | undefined;
       if (!c.archived) {
-        if (c.jira?.resolved) readyToShip = `ticket ${c.jira.status ?? 'resolved'}`;
+        if (c.jiraKey && c.jira?.resolved) readyToShip = `ticket ${c.jira.status ?? 'resolved'}`;
         else if (c.zone === 'storage' && c.endedAt && now - c.endedAt > READY_TO_SHIP_AFTER_MS) readyToShip = 'in storage 3+ days';
       }
       return { ...c, readyToShip, hasTerminal: !!c.slot && liveSlots.has(c.slot) };

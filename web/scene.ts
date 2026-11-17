@@ -189,11 +189,13 @@ export class Scene {
       return sp ? NET.dock.track.project(sp) : 0;
     };
     this.dockQueue.sort((a, b) => along(b) - along(a));
-    // The belt only exits past the front, so crates physically ahead of the rearmost departing crate make way
-    // (go round the recycle loop). Crates stacked in the same pile spot are not ahead of it.
+    // The belt only exits past the front, so crates physically ahead of the rearmost departing crate must make
+    // way round the recycle loop. To keep the queue's order, the crates behind it follow them round too.
+    // Crates stacked in the same pile spot are not ahead of it; if nobody is ahead, the rest just move up.
     const departing = this.dockQueue.filter((id) => !stillDocked.has(id));
     const rearmost = departing.length ? Math.min(...departing.map(along)) : Infinity;
-    const makeWay = this.dockQueue.filter((id) => stillDocked.has(id) && along(id) > rearmost + 6);
+    const ahead = this.dockQueue.some((id) => stillDocked.has(id) && along(id) > rearmost + 6);
+    const makeWay = ahead ? this.dockQueue.filter((id) => stillDocked.has(id)) : [];
     const reordered = { loopers: makeWay };
     this.dockQueue = [...this.dockQueue.filter((id) => stillDocked.has(id) && !makeWay.includes(id)), ...joining.filter((id) => !this.dockQueue.includes(id))];
     for (const id of makeWay) this.recycling.set(id, 'out');

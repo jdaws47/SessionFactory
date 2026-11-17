@@ -58,6 +58,30 @@ describe('dock departures while a crate is still arriving', () => {
   });
 });
 
+describe('dock order', () => {
+  it('when a middle crate leaves, the queue keeps its order (everyone circulates, nobody overtakes)', () => {
+    const scene = new Scene();
+    let crates = [crate('A', 'dock', 100), crate('B', 'dock', 200), crate('C', 'dock', 300)];
+    scene.setCrates(crates, 1000);
+    crates = crates.map((c) => (c.id === 'B' ? { ...c, zone: 'working', zoneSince: 400 } : c));
+    scene.setCrates(crates, 1100);
+    step(scene, 60);
+    const internals = scene as unknown as { dockQueue: string[] };
+    expect(internals.dockQueue).toEqual(['A', 'C']);
+    expect(sprite(scene, 'A').x).toBeLessThan(sprite(scene, 'C').x);
+  });
+
+  it('when the front crate leaves, the rest just move up', () => {
+    const scene = new Scene();
+    let crates = [crate('A', 'dock', 100), crate('B', 'dock', 200), crate('C', 'dock', 300)];
+    scene.setCrates(crates, 1000);
+    crates = crates.map((c) => (c.id === 'A' ? { ...c, zone: 'working', zoneSince: 400 } : c));
+    scene.setCrates(crates, 1100);
+    expect(recycles(sprite(scene, 'B'))).toBe(false);
+    expect(recycles(sprite(scene, 'C'))).toBe(false);
+  });
+});
+
 describe('crates never drive through each other', () => {
   function overlapTest(seed: number, count = 12, every = 70) {
     let r = seed;

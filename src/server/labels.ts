@@ -36,7 +36,10 @@ export function snippet(text: string, max: number): string {
  */
 export function refreshLabel(crate: Crate, projects: string[] = DEFAULT_JIRA_PROJECTS): void {
   // A crate is linked to a ticket only by its session name (sessions started from a ticket are named after it).
-  crate.jiraKey = crate.jiraUnlinked ? undefined : findJiraKey(crate.title, projects);
+  const key = crate.jiraUnlinked ? undefined : findJiraKey(crate.title, projects);
+  // Ticket status belongs to the linked ticket; drop it when the link changes or goes away.
+  if (key !== crate.jiraKey) crate.jira = undefined;
+  crate.jiraKey = key;
   if (crate.labelSource === 'manual') return;
   if (crate.title) {
     crate.label = crate.title;

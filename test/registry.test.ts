@@ -150,6 +150,15 @@ describe('unlinking a Jira ticket', () => {
     expect(reg.get(id)?.label).toBe('TF-679 fixes');
   });
 
+  it('a crate that loses its ticket link no longer shows the old ticket as ready to ship', () => {
+    reg.ingest(ev({ kind: 'start', sessionId: 'd', title: 'TF-9 work' }));
+    const id = reg.all().find((c) => c.sessionIds.includes('d'))!.id;
+    reg.setJira(id, { status: 'Done', resolved: true }, 1);
+    expect(reg.view(2).find((c) => c.id === id)?.readyToShip).toMatch(/Done/);
+    reg.setTitle(id, 'something else');
+    expect(reg.view(3).find((c) => c.id === id)?.readyToShip).toBeUndefined();
+  });
+
   it('links by session name only, never by prompts', () => {
     reg.ingest(ev({ kind: 'prompt', sessionId: 'b', prompt: 'look at TF-679 too' }));
     expect(reg.all().find((c) => c.sessionIds.includes('b'))?.jiraKey).toBeUndefined();
