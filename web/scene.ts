@@ -548,6 +548,7 @@ export class Scene {
     this.drawJamTag(ctx);
     drawCrane(ctx, this.cranes.storage, YARD.rails);
     drawCrane(ctx, this.cranes.freight, FREIGHT.rails);
+    this.drawBadges(ctx);
   }
 
   /** Live tag beside the assembly hall title, only while some machine is jammed waiting on you. */
@@ -742,26 +743,36 @@ export class Scene {
       ctx.fillStyle = C.text;
       ctx.fillText(c.jiraKey, cx, y + CRATE_H + 14);
     }
-    if (moving) return;
+  }
 
-    if (s.pileSize > 1) {
-      const label = `+${s.pileSize - 1}`;
-      ctx.font = '800 10px system-ui, sans-serif';
-      const w = ctx.measureText(label).width + 10;
-      fillSquircle(ctx, x - 8, y - 8, w, 16, RADIUS.small, '#e5e7eb');
-      ctx.fillStyle = '#111';
-      ctx.fillText(label, x - 8 + w / 2, y + 4);
-    }
-    if (c.zone === 'dock') {
-      ctx.fillStyle = C.dim;
-      ctx.font = '10px system-ui, sans-serif';
-      ctx.fillText(`waiting ${minutes(this.now() - c.zoneSince)}`, cx, y - 6);
-    }
-    if (c.readyToShip) {
-      fillSquircle(ctx, x + CRATE_W - 26, y - 9, 36, 15, RADIUS.small, C.ship);
-      ctx.fillStyle = '#052e22';
-      ctx.font = '800 9px system-ui, sans-serif';
-      ctx.fillText('SHIP?', x + CRATE_W - 8, y + 2);
+  /** Badges on parked crates (pile count, wait time, SHIP?), drawn last so nothing overhead covers them. */
+  private drawBadges(ctx: CanvasRenderingContext2D): void {
+    for (const [id, s] of this.drawOrder()) {
+      const c = this.crates.get(id);
+      if (!c || s.path.length || s.next || s.leaving || s.pileRank > 0 || this.heldBy(id)) continue;
+      const x = Math.round(s.x - CRATE_W / 2);
+      const y = Math.round(s.y - CRATE_H / 2);
+      const cx = x + CRATE_W / 2;
+      ctx.textAlign = 'center';
+      if (s.pileSize > 1) {
+        const label = `+${s.pileSize - 1}`;
+        ctx.font = '800 10px system-ui, sans-serif';
+        const w = ctx.measureText(label).width + 10;
+        fillSquircle(ctx, x - 8, y - 8, w, 16, RADIUS.small, '#e5e7eb');
+        ctx.fillStyle = '#111';
+        ctx.fillText(label, x - 8 + w / 2, y + 4);
+      }
+      if (c.zone === 'dock') {
+        ctx.fillStyle = C.dim;
+        ctx.font = '10px system-ui, sans-serif';
+        ctx.fillText(`waiting ${minutes(this.now() - c.zoneSince)}`, cx, y - 6);
+      }
+      if (c.readyToShip) {
+        fillSquircle(ctx, x + CRATE_W - 26, y - 9, 36, 15, RADIUS.small, C.ship);
+        ctx.fillStyle = '#052e22';
+        ctx.font = '800 9px system-ui, sans-serif';
+        ctx.fillText('SHIP?', x + CRATE_W - 8, y + 2);
+      }
     }
   }
 }
