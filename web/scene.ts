@@ -670,10 +670,6 @@ function drawOperator(ctx: CanvasRenderingContext2D): void {
   fillSquircle(ctx, x - 9, y - 28, 18, 18, RADIUS.medium, '#f1c27d');
   fillSquircle(ctx, x - 12, y - 32, 24, 9, RADIUS.small, C.orange);
   fillSquircle(ctx, x - 15, y - 25, 30, 4, 2, C.orange);
-  ctx.fillStyle = C.text;
-  ctx.font = '800 11px system-ui, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('YOU', x, y + 52);
 }
 
 const MACHINE_W = 148;
