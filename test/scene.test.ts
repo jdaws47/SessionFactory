@@ -180,6 +180,34 @@ describe('crates never drive through each other', () => {
   }
 });
 
+describe('piles', () => {
+  type Internals = { sprites: Map<string, { at: { slot: number }; pileRank: number }>; drawOrder(): [string, unknown][]; pileOffset(s: unknown): { x: number; y: number } };
+  const internals = (scene: Scene) => scene as unknown as Internals;
+
+  it('are last in, first out: the newest crate is on top, drawn last, and the first to leave the pile', () => {
+    const scene = new Scene();
+    const cap = NET.storage.slots.length;
+    const crates = Array.from({ length: cap + 2 }, (_, i) => crate(`c${i}`, 'storage', 100 + i));
+    scene.setCrates(crates, 1000);
+    const pile = [`c${cap - 1}`, `c${cap}`, `c${cap + 1}`];
+    const { sprites } = internals(scene);
+    expect(new Set(pile.map((id) => sprites.get(id)!.at.slot)).size).toBe(1);
+
+    // Drawn bottom to top in arrival order, each one higher than the one under it.
+    const order = internals(scene).drawOrder().map(([id]) => id).filter((id) => pile.includes(id));
+    expect(order).toEqual(pile);
+    const heights = pile.map((id) => internals(scene).pileOffset(sprites.get(id)).y);
+    expect(heights[1]).toBeLessThan(heights[0]);
+    expect(heights[2]).toBeLessThan(heights[1]);
+
+    // A spot frees up: the top crate (newest) moves into it, the older ones stay put.
+    scene.setCrates(crates.filter((c) => c.id !== 'c0'), 2000);
+    expect(sprites.get(`c${cap + 1}`)!.at.slot).toBe(0);
+    expect(sprites.get(`c${cap}`)!.at.slot).toBe(cap - 1);
+    expect(sprites.get(`c${cap - 1}`)!.at.slot).toBe(cap - 1);
+  });
+});
+
 describe('freight train and warehouse', () => {
   type Stage = Sprite & { stage?: string; at: { zone: string; slot: number } };
   const st = (scene: Scene, id: string) => (scene as unknown as { sprites: Map<string, Stage> }).sprites.get(id)!;

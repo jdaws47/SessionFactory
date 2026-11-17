@@ -305,12 +305,15 @@ export class Scene {
     const rest: CrateView[] = [];
     for (const c of [...list].sort((a, b) => a.zoneSince - b.zoneSince)) {
       const s = this.sprites.get(c.id);
-      if (s && !s.leaving && s.at.zone === zone && !used.has(s.at.slot) && s.pileRank === 0) {
+      // The bottom of each pile (or a crate alone in its spot) keeps it; crates piled on top are what move.
+      if (s && !s.leaving && s.at.zone === zone && !used.has(s.at.slot) && s.pileRank === s.pileSize - 1) {
         used.add(s.at.slot);
         out.set(c.id, s.at.slot);
       } else rest.push(c);
     }
-    for (const c of rest) {
+    // Last in, first out: crates already piled here take free spots newest (top) first; arrivals follow in order.
+    const piled = (c: CrateView) => this.sprites.get(c.id)?.at.zone === zone && !this.sprites.get(c.id)!.leaving;
+    for (const c of [...rest.filter(piled).reverse(), ...rest.filter((c) => !piled(c))]) {
       let slot = 0;
       while (slot < cap && used.has(slot)) slot++;
       if (slot >= cap) slot = cap - 1;
@@ -706,7 +709,8 @@ export class Scene {
   private pileOffset(s: Sprite): Point {
     const moving = s.path.length > 0 || !!s.next;
     // Only crates parked in a factory pile spot stack up; archived crates (train, warehouse) never do.
-    const k = moving || s.stage ? 0 : Math.min(s.pileRank, 3);
+    // Rank 0 is the newest crate, on top: the pile rises from the oldest (shown up to 4 high).
+    const k = moving || s.stage ? 0 : Math.max(0, Math.min(s.pileSize - 1, 3) - s.pileRank);
     return { x: s.x - k * 6, y: s.y - k * 6 };
   }
 
@@ -961,8 +965,9 @@ export class Scene {
       const c = this.crates.get(id);
       const parked = !s.path.length && !s.next && !this.heldBy(id);
       if (!c || s.leaving || s.loading !== undefined || (parked && s.pileRank > 0)) continue;
-      const x = Math.round(s.x - CRATE_W / 2);
-      const y = Math.round(s.y - CRATE_H / 2);
+      const top = this.pileOffset(s);
+      const x = Math.round(top.x - CRATE_W / 2);
+      const y = Math.round(top.y - CRATE_H / 2);
       const cx = x + CRATE_W / 2;
       ctx.textAlign = 'center';
       if (parked && s.pileSize > 1) {
