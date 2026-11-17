@@ -1,6 +1,6 @@
-import type { CrateView, Zone } from '../src/shared/types';
+import type { CrateView } from '../src/shared/types';
 import { ALL_TRACKS, BELT_SPEED, FREIGHT_LOAD, fromHopper, HOPPER_DROP, JUNCTIONS, NET, type SlotRef, type Track, travel } from './belts';
-import { AREAS, type Area, CRATE_H, CRATE_W, H, HOPPER, OPERATOR, type Point, TRAIN_Y, W } from './layout';
+import { AREAS, type Area, CRATE_H, CRATE_W, floorArea, H, HOPPER, OPERATOR, type Point, TRAIN_Y, W } from './layout';
 import { squircleAt, squirclePath } from './shapes';
 
 const C = {
@@ -110,7 +110,7 @@ function fillSquircle(ctx: CanvasRenderingContext2D, x: number, y: number, w: nu
   ctx.fill();
 }
 
-const QUEUE_ZONES = new Set<Zone>(['dock', 'intake']);
+const QUEUE_ZONES = new Set<Area>(['dock', 'intake']);
 
 export class Scene {
   private sprites = new Map<string, Sprite>();
@@ -128,8 +128,12 @@ export class Scene {
     this.crates = new Map(crates.map((c) => [c.id, c]));
     this.archivedCount = crates.filter((c) => c.archived).length;
 
-    const byZone = new Map<Zone, CrateView[]>();
-    for (const c of crates) if (!c.archived) byZone.set(c.zone, [...(byZone.get(c.zone) ?? []), c]);
+    const byZone = new Map<Area, CrateView[]>();
+    for (const c of crates) {
+      if (c.archived) continue;
+      const area = floorArea(c.zone);
+      byZone.set(area, [...(byZone.get(area) ?? []), c]);
+    }
 
     for (const [zone, list] of byZone) {
       const assigned = QUEUE_ZONES.has(zone) ? this.queueSlots(zone, list) : this.stickySlots(zone, list);
@@ -154,14 +158,14 @@ export class Scene {
   }
 
   /** Dock and intake are queues on the belt itself: order decides position, the back of the queue piles up. */
-  private queueSlots(zone: Zone, list: CrateView[]): Map<string, number> {
+  private queueSlots(zone: Area, list: CrateView[]): Map<string, number> {
     const cap = NET[zone].slots.length;
     const ordered = [...list].sort((a, b) => (zone === 'dock' ? a.zoneSince - b.zoneSince : a.startedAt - b.startedAt));
     return new Map(ordered.map((c, i) => [c.id, Math.min(i, cap - 1)]));
   }
 
   /** Machines, alert spots and storage spots keep their crate until it leaves; extras pile on the last spot. */
-  private stickySlots(zone: Zone, list: CrateView[]): Map<string, number> {
+  private stickySlots(zone: Area, list: CrateView[]): Map<string, number> {
     const cap = NET[zone].slots.length;
     const used = new Set<number>();
     const out = new Map<string, number>();
@@ -447,21 +451,6 @@ export class Scene {
       ctx.fillStyle = '#111';
       ctx.fillText(label, x - 8 + w / 2, y + 4);
     }
-    if (c.zone === 'alert') {
-      ctx.save();
-      ctx.shadowColor = C.alert;
-      ctx.shadowBlur = 10;
-      fillSquircle(ctx, cx - 11, y - 28, 22, 22, RADIUS.medium, C.alert);
-      ctx.restore();
-      ctx.fillStyle = '#fff';
-      ctx.font = '900 15px system-ui, sans-serif';
-      ctx.fillText('!', cx, y - 11);
-      if (c.alertReason) {
-        ctx.fillStyle = '#fca5a5';
-        ctx.font = '10px system-ui, sans-serif';
-        ctx.fillText(c.alertReason, cx, y + CRATE_H + (c.jiraKey && c.jiraKey !== c.label ? 30 : 14));
-      }
-    }
     if (c.zone === 'dock') {
       ctx.fillStyle = C.dim;
       ctx.font = '10px system-ui, sans-serif';
@@ -553,15 +542,22 @@ const MACHINE_W = 148;
 const MACHINE_H = 76;
 const TOP_ROW_Y = 148;
 
+type MachineMode = 'idle' | 'working' | 'jammed';
+
+function modeOf(crate: CrateView | undefined): MachineMode {
+  if (!crate) return 'idle';
+  return crate.zone === 'alert' ? 'jammed' : 'working';
+}
+
 /** Machine housing behind the crate: snug around it, with stack, lamp and status band. */
 function machineBack(ctx: CanvasRenderingContext2D, pos: Point, t: number, index: number, crate: CrateView | undefined): void {
-  const active = !!crate;
+  const mode = modeOf(crate);
   const x = pos.x - MACHINE_W / 2;
   const y = pos.y - MACHINE_H / 2;
   ctx.save();
-  ctx.shadowColor = active ? 'rgba(246,181,69,0.35)' : 'rgba(0,0,0,0.5)';
-  ctx.shadowBlur = active ? 18 : 10;
-  ctx.shadowOffsetY = active ? 0 : 4;
+  ctx.shadowColor = mode === 'jammed' ? 'rgba(239,68,68,0.5)' : mode === 'working' ? 'rgba(246,181,69,0.35)' : 'rgba(0,0,0,0.5)';
+  ctx.shadowBlur = mode === 'idle' ? 10 : 20;
+  ctx.shadowOffsetY = mode === 'idle' ? 4 : 0;
   const body = ctx.createLinearGradient(0, y, 0, y + MACHINE_H);
   body.addColorStop(0, C.machineTop);
   body.addColorStop(1, C.machineBottom);
@@ -570,31 +566,63 @@ function machineBack(ctx: CanvasRenderingContext2D, pos: Point, t: number, index
   ctx.save();
   squirclePath(ctx, x, y, MACHINE_W, MACHINE_H, RADIUS.large);
   ctx.clip();
-  ctx.fillStyle = active ? C.orange : '#6b6258';
+  ctx.fillStyle = mode === 'jammed' ? C.alert : mode === 'working' ? C.orange : '#6b6258';
   ctx.fillRect(x, y, MACHINE_W, 7);
   ctx.restore();
   fillSquircle(ctx, x + MACHINE_W - 24, y - 12, 13, 16, RADIUS.small, '#4a4e55');
-  if (active) smoke(ctx, x + MACHINE_W - 18, y - 16, t, index);
-  fillSquircle(ctx, x + 6, y + 11, 7, 7, 2, active ? '#4ade80' : '#3b3f45');
+  if (mode === 'working') smoke(ctx, x + MACHINE_W - 18, y - 16, t, index);
+  fillSquircle(ctx, x + 6, y + 11, 7, 7, 2, mode === 'jammed' ? C.alert : mode === 'working' ? '#4ade80' : '#3b3f45');
 }
 
-/** Cogs overlap the crate's sides, turning slowly while Claude works; the tool sign sits on the far side from the bus. */
+/**
+ * Jammed gears strain forward, stop, and settle back: a quick nudge, a slower return, then a pause.
+ * Returns the rotation in radians for time t.
+ */
+function strain(t: number, offset: number): number {
+  const phase = ((t + offset) % 1600) / 1600;
+  if (phase < 0.12) return 0.32 * Math.sin((phase / 0.12) * (Math.PI / 2));
+  if (phase < 0.45) return 0.32 * (1 - (phase - 0.12) / 0.33);
+  return 0;
+}
+
+/**
+ * Cogs overlap the crate's sides: turning while Claude works, straining against a jam while it waits on you.
+ * A jammed machine gets a hazard frame and a big alert badge. Signs sit on the side away from the bus.
+ */
 function machineFront(ctx: CanvasRenderingContext2D, pos: Point, t: number, crate: CrateView | undefined): void {
-  const active = !!crate;
-  const color = active ? C.amber : '#5b5f66';
-  cog(ctx, pos.x - MACHINE_W / 2 + 10, pos.y + 6, 22, active ? t / 750 : 0, color);
-  cog(ctx, pos.x + MACHINE_W / 2 - 10, pos.y + 6, 22, active ? -t / 750 : 0, color);
+  const mode = modeOf(crate);
+  const color = mode === 'working' ? C.amber : mode === 'jammed' ? '#f87171' : '#5b5f66';
+  const spin = mode === 'working' ? t / 750 : mode === 'jammed' ? strain(t, pos.x) : 0;
+  cog(ctx, pos.x - MACHINE_W / 2 + 10, pos.y + 6, 22, spin, color);
+  cog(ctx, pos.x + MACHINE_W / 2 - 10, pos.y + 6, 22, -spin, color);
   if (!crate) return;
-  const sign = crate.waitingOn ? `⏳ ${crate.waitingOn}` : crate.lastTool;
+
+  const topRow = pos.y < TOP_ROW_Y + 1;
+  if (mode === 'jammed') {
+    hazardRim(ctx, { x: pos.x - MACHINE_W / 2 - 6, y: pos.y - MACHINE_H / 2 - 6, w: MACHINE_W + 12, h: MACHINE_H + 12 }, 6);
+    const by = topRow ? pos.y - MACHINE_H / 2 - 22 : pos.y + MACHINE_H / 2 - 14;
+    ctx.save();
+    ctx.shadowColor = C.alert;
+    ctx.shadowBlur = 16;
+    fillSquircle(ctx, pos.x - 18, by, 36, 36, RADIUS.medium, C.alert);
+    ctx.restore();
+    ctx.fillStyle = '#fff';
+    ctx.font = '900 24px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('!', pos.x, by + 27);
+  }
+
+  const sign = mode === 'jammed' ? (crate.alertReason ?? 'needs you') : crate.waitingOn ? `⏳ ${crate.waitingOn}` : crate.lastTool;
   if (!sign) return;
-  ctx.font = '600 10px ui-monospace, monospace';
+  ctx.font = '700 10px ui-monospace, monospace';
   const label = short(sign, 22);
   const tw = ctx.measureText(label).width + 14;
-  const sy = pos.y < TOP_ROW_Y + 1 ? pos.y - MACHINE_H / 2 - 20 : pos.y + MACHINE_H / 2 + 4;
-  fillSquircle(ctx, pos.x - tw / 2, sy, tw, 16, RADIUS.small, '#121315');
-  ctx.fillStyle = crate.waitingOn ? '#93c5fd' : C.amber;
+  const sx = mode === 'jammed' ? pos.x + 24 : pos.x - tw / 2;
+  const sy = topRow ? pos.y - MACHINE_H / 2 - 20 : pos.y + MACHINE_H / 2 + 4;
+  fillSquircle(ctx, sx, sy, tw, 16, RADIUS.small, mode === 'jammed' ? '#450a0a' : '#121315');
+  ctx.fillStyle = mode === 'jammed' ? '#fecaca' : crate.waitingOn ? '#93c5fd' : C.amber;
   ctx.textAlign = 'center';
-  ctx.fillText(label, pos.x, sy + 12);
+  ctx.fillText(label, sx + tw / 2, sy + 12);
 }
 
 /** A squircle cog: rounded-square body with four teeth. */
@@ -727,18 +755,15 @@ function foundation(g: CanvasRenderingContext2D, key: Area, a: (typeof AREAS)[Ar
   g.fillRect(a.x, a.y, a.w, a.h);
   g.restore();
 
-  if (key === 'alert') hazardRim(g, a);
-  else {
-    g.strokeStyle = C.concreteEdge;
-    g.lineWidth = 3;
-    squirclePath(g, a.x + 1.5, a.y + 1.5, a.w - 3, a.h - 3, RADIUS.large - 1);
-    g.stroke();
-  }
+  g.strokeStyle = C.concreteEdge;
+  g.lineWidth = 3;
+  squirclePath(g, a.x + 1.5, a.y + 1.5, a.w - 3, a.h - 3, RADIUS.large - 1);
+  g.stroke();
 
   const left = a.x + (TITLE_INSET[key] ?? 16);
   g.font = '800 13px system-ui, sans-serif';
   const tw = g.measureText(a.title).width;
-  fillSquircle(g, left, a.y + 12, tw + 20, 24, RADIUS.small, key === 'alert' ? C.alert : C.orange);
+  fillSquircle(g, left, a.y + 12, tw + 20, 24, RADIUS.small, C.orange);
   g.fillStyle = '#1a1208';
   g.textAlign = 'left';
   g.fillText(a.title, left + 10, a.y + 29);
@@ -749,20 +774,21 @@ function foundation(g: CanvasRenderingContext2D, key: Area, a: (typeof AREAS)[Ar
   }
 }
 
-function hazardRim(g: CanvasRenderingContext2D, a: { x: number; y: number; w: number; h: number }): void {
+/** Yellow/black hazard-striped frame of the given thickness around a rectangle. */
+function hazardRim(g: CanvasRenderingContext2D, a: { x: number; y: number; w: number; h: number }, thickness: number): void {
   const rim = new Path2D();
   addSquircle(rim, a.x, a.y, a.w, a.h, RADIUS.large);
-  addSquircle(rim, a.x + 7, a.y + 7, a.w - 14, a.h - 14, RADIUS.large - 5);
+  addSquircle(rim, a.x + thickness, a.y + thickness, a.w - thickness * 2, a.h - thickness * 2, RADIUS.large - thickness / 2);
   g.save();
   g.clip(rim, 'evenodd');
   g.fillStyle = '#facc15';
   g.fillRect(a.x, a.y, a.w, a.h);
   g.fillStyle = '#18140c';
-  for (let i = -a.h; i < a.w; i += 18) {
+  for (let i = -a.h; i < a.w; i += 14) {
     g.beginPath();
     g.moveTo(a.x + i, a.y + a.h);
-    g.lineTo(a.x + i + 9, a.y + a.h);
-    g.lineTo(a.x + i + 9 + a.h, a.y);
+    g.lineTo(a.x + i + 7, a.y + a.h);
+    g.lineTo(a.x + i + 7 + a.h, a.y);
     g.lineTo(a.x + i + a.h, a.y);
     g.closePath();
     g.fill();

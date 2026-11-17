@@ -203,7 +203,7 @@ const TOP_BUS = 220;
 const BOTTOM_BUS = 690;
 const TOP_ROWS = [148, 292];
 const BOTTOM_ROWS = [610, 770];
-export const MACHINE_COLUMNS = [420, 613, 807, 1000];
+export const MACHINE_COLUMNS = [420, 620, 820, 1020, 1220, 1420];
 const SIDE_COLUMNS = [1300, 1430];
 
 export const HOPPER_DROP: Point = { x: 145, y: 200 };
@@ -223,8 +223,7 @@ export const NET: Record<Area, ZoneNet> = {
     ],
     (t) => trackSlots(t, [{ x: 145, y: 336 }, { x: 145, y: 266 }]),
   ),
-  working: zone(topZoneTrack(310, 1110, TOP_BUS), (t) => TOP_ROWS.flatMap((y) => MACHINE_COLUMNS.map((x) => stubSlot(t, TOP_BUS, 1, { x, y })))),
-  alert: zone(topZoneTrack(1180, 1535, TOP_BUS), (t) => TOP_ROWS.flatMap((y) => SIDE_COLUMNS.map((x) => stubSlot(t, TOP_BUS, 1, { x, y })))),
+  working: zone(topZoneTrack(310, 1530, TOP_BUS), (t) => TOP_ROWS.flatMap((y) => MACHINE_COLUMNS.map((x) => stubSlot(t, TOP_BUS, 1, { x, y })))),
   freight: zone(bottomZoneTrack(230, 60, FREIGHT_LOAD.y), (t) => trackSlots(t, [FREIGHT_LOAD])),
   dock: zone(bottomZoneTrack(1100, 330, DOCK_Y), (t) => trackSlots(t, [0, 1, 2, 3, 4].map((i) => ({ x: DOCK_FRONT_X + i * 134, y: DOCK_Y })))),
   storage: zone(bottomZoneTrack(1540, 1180, BOTTOM_BUS), (t) => BOTTOM_ROWS.flatMap((y) => SIDE_COLUMNS.map((x) => stubSlot(t, BOTTOM_BUS, -1, { x, y })))),

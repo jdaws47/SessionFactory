@@ -65,7 +65,7 @@ Factory terminals: the server starts `tmux new-session -e SF_SLOT=<slot>` in cle
 
 State flow: Claude hook → `hooks/emit-event` → `data/events/*.json` → `EventIngestor` → `Registry.ingest` → `applyEvent` → websocket broadcast → `Scene.setCrates`.
 
-Zones: `intake` (started, no prompt yet) → `working` (prompt / tool use) → `alert` (permission prompt, question, elicitation) → `dock` (turn finished) → `storage` (session ended or process gone). Archived crates leave the floor for the Warehouse.
+Zones: `intake` (started, no prompt yet) → `working` (prompt / tool use) → `alert` (permission prompt, question, elicitation) → `dock` (turn finished) → `storage` (session ended or process gone). Archived crates leave the floor for the Warehouse. On the floor, `alert` has no area of its own: the crate stays in its assembler, which is drawn jammed (`layout.floorArea`).
 
 ## Testing
 
