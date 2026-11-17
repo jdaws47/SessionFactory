@@ -1,5 +1,5 @@
 import type { CrateView } from '../src/shared/types';
-import { ALL_TRACKS, BELT_SPEED, FREIGHT_LOAD, fromHopper, type Gate, GATES, HOPPER_DROP, JUNCTIONS, LOOP, NET, type SlotRef, type Track, travel, type Waypoint, YARD } from './belts';
+import { ALL_TRACKS, BELT_SPEED, DOCK_END, FREIGHT_LOAD, fromHopper, HOPPER_DROP, JUNCTIONS, LOOP, NET, type SlotRef, type Track, travel, type Waypoint, YARD } from './belts';
 import { AREAS, type Area, CRATE_H, CRATE_W, floorArea, H, HOPPER, OPERATOR, type Point, TRAIN_Y, W } from './layout';
 import { squircleAt, squirclePath } from './shapes';
 
@@ -128,7 +128,6 @@ export class Scene {
   /** How far each belt section has travelled (key "belt:section"); sections only advance while carrying something. */
   private beltOffset = new Map<string, number>();
   private running = new Set<string>([sectionKey(LOOP, 0)]);
-  private openGates = new Set<Gate>();
   /** Where the storage crane's trolley is; it stays where it last put something down. */
   private crane: Point = { x: (YARD.rails.left + YARD.rails.right) / 2, y: YARD.rails.top + 10 };
   private craneBusy = false;
@@ -244,7 +243,6 @@ export class Scene {
 
   update(dt: number): void {
     this.running = new Set([sectionKey(LOOP, 0)]);
-    this.openGates = new Set();
     this.craneBusy = false;
     const yard = AREAS.storage;
     for (const s of this.sprites.values()) {
@@ -258,13 +256,7 @@ export class Scene {
         }
         continue;
       }
-      const at = belt.project(s);
-      this.running.add(sectionKey(belt, belt.sectionOf(at)));
-      for (const g of GATES) {
-        const queue = NET[g.zone].track;
-        // Lift for a crate heading out through the gate, from the front spot until it is past.
-        if (belt === queue && at > g.s - 90 && at < g.s + 40 && s.path.some((w) => w.track === queue && queue.project(w) > g.s)) this.openGates.add(g);
-      }
+      this.running.add(sectionKey(belt, belt.sectionOf(belt.project(s))));
     }
     for (const k of this.running) this.beltOffset.set(k, (this.beltOffset.get(k) ?? 0) + BELT_SPEED * dt);
 
@@ -325,6 +317,7 @@ export class Scene {
     this.drawStatic(ctx, opts.pixelRatio);
     for (const track of ALL_TRACKS) drawBelt(ctx, track, (i) => this.beltOffset.get(sectionKey(track, i)) ?? 0);
     for (const j of JUNCTIONS) junction(ctx, j);
+    endStop(ctx, DOCK_END);
     this.drawHopper(ctx, opts.terminals);
     this.drawTrain(ctx, t);
     drawOperator(ctx);
@@ -338,7 +331,6 @@ export class Scene {
     }
 
     machines.forEach((m) => machineFront(ctx, m.pos, t, m.crate));
-    for (const g of GATES) this.drawGate(ctx, g);
     drawGantry(ctx, this.loadingNow());
     this.drawCrane(ctx);
   }
@@ -365,39 +357,6 @@ export class Scene {
     if (this.craneBusy) {
       for (const dx of [-CRATE_W / 2 + 6, CRATE_W / 2 - 10]) fillSquircle(ctx, tx + dx, by - 4, 4, 18, 1.5, '#9ca3af');
     }
-  }
-
-  /** A zone's gate is closed while its belt is stopped with crates waiting, and lifts while the belt runs. */
-  private drawGate(ctx: CanvasRenderingContext2D, g: Gate): void {
-    const open = this.openGates.has(g);
-    const waiting = [...this.sprites.values()].some((s) => !s.leaving && s.at.zone === g.zone && !s.path.length && !s.next);
-    const { x, y } = g.at;
-    const horizontalBelt = g.belt === 'h';
-    const post = horizontalBelt ? { x, y: y - 24 } : { x: x + 24, y };
-    fillSquircle(ctx, post.x - 6, post.y - 6, 12, 12, RADIUS.small, '#4a4e55');
-    ctx.save();
-    ctx.translate(post.x, post.y);
-    if (!horizontalBelt) ctx.rotate(Math.PI / 2);
-    if (open) ctx.rotate(Math.PI / 2);
-    const len = 46;
-    squirclePath(ctx, -3, 0, 6, len, 2);
-    ctx.fillStyle = '#f5f5f4';
-    ctx.fill();
-    ctx.save();
-    squirclePath(ctx, -3, 0, 6, len, 2);
-    ctx.clip();
-    ctx.fillStyle = C.alert;
-    for (let k = 6; k < len; k += 12) ctx.fillRect(-3, k, 6, 6);
-    ctx.restore();
-    ctx.restore();
-    fillSquircle(ctx, post.x - 3.5, post.y - 3.5, 7, 7, 2, open ? '#4ade80' : waiting ? C.alert : '#57534e');
-    if (!waiting && !open) return;
-    ctx.fillStyle = open ? C.dim : '#fca5a5';
-    ctx.font = '600 9px system-ui, sans-serif';
-    ctx.textAlign = horizontalBelt ? 'center' : 'left';
-    const lx = horizontalBelt ? x : x + 36;
-    const ly = horizontalBelt ? y + 30 : y - 6;
-    g.label.forEach((line, i) => ctx.fillText(open ? (i ? '' : 'moving') : line, lx, ly + i * 11));
   }
 
   private machineStates(): { pos: Point; index: number; crate?: CrateView }[] {
@@ -651,6 +610,12 @@ function drawBelt(ctx: CanvasRenderingContext2D, track: Track, travelled: (secti
     ctx.restore();
   }
   ctx.restore();
+}
+
+/** Bumper where the dock's queue belt dead-ends at the operator. */
+function endStop(ctx: CanvasRenderingContext2D, p: Point): void {
+  fillSquircle(ctx, p.x - 8, p.y - 18, 10, 36, RADIUS.small, '#3a3e45');
+  fillSquircle(ctx, p.x - 8, p.y - 18, 3, 36, 1, C.orange);
 }
 
 /** Splitter/merger block where a zone belt meets the main loop. */

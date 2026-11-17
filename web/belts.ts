@@ -142,11 +142,24 @@ export interface CraneSlot {
   dropS: number;
 }
 
-export type Slot = StubSlot | TrackSlot | CraneSlot;
+/** A spot on a queue belt with its own exit branch down to a parallel exit lane, so any crate can leave without passing the others. */
+export interface QueueSlot {
+  kind: 'queue';
+  pos: Point;
+  /** Distance along the queue (entry) belt. */
+  s: number;
+  out: Track;
+  /** Where the branch joins the exit lane. */
+  mergeS: number;
+}
+
+export type Slot = StubSlot | TrackSlot | CraneSlot | QueueSlot;
 
 export interface ZoneNet {
-  /** One-way belt from the loop, through the zone, back to the loop. */
+  /** One-way belt from the loop, through the zone, back to the loop (for the dock: the queue belt, which dead-ends). */
   track: Track;
+  /** Separate lane back to the loop, for zones whose entry belt dead-ends (the dock). */
+  exit?: Track;
   slots: Slot[];
   entryLoopS: number;
   exitLoopS: number;
@@ -230,7 +243,7 @@ function hopperLine(): ZoneNet {
   const exitLoopS = LOOP.project(track.pts[track.pts.length - 1]);
   return {
     track,
-    slots: trackSlots(track, [{ x: HOPPER_DROP.x, y: 336 }, { x: HOPPER_DROP.x, y: 266 }]),
+    slots: trackSlots(track, [{ x: HOPPER_DROP.x, y: 300 }]),
     entryLoopS: exitLoopS,
     exitLoopS,
     junctions: [corner],
@@ -246,8 +259,37 @@ const TOP_ROWS = [148, 292];
 export const MACHINE_COLUMNS = [420, 620, 820, 1020, 1220, 1420];
 
 export const HOPPER_DROP: Point = { x: 145, y: 196 };
-export const DOCK_FRONT_X = 440;
-export const DOCK_Y = 650;
+export const DOCK_FRONT_X = 480;
+export const DOCK_Y = 600;
+const DOCK_EXIT_Y = 700;
+/** Where the queue belt dead-ends, at the operator's station. */
+export const DOCK_END: Point = { x: 418, y: DOCK_Y };
+
+/**
+ * The loading dock: a queue belt that dead-ends at the operator, plus a parallel exit lane below it.
+ * Every queue spot has its own branch straight down to the exit lane.
+ */
+function dockYard(): ZoneNet {
+  const xIn = 1100;
+  const xOut = 330;
+  const entry = new Track(rounded([{ x: xIn + R, y: LANE_BOTTOM }, { x: xIn, y: LANE_BOTTOM }, { x: xIn, y: DOCK_Y }, DOCK_END], R));
+  const exit = new Track(rounded([{ x: 1060, y: DOCK_EXIT_Y }, { x: xOut, y: DOCK_EXIT_Y }, { x: xOut, y: LANE_BOTTOM }, { x: xOut - R, y: LANE_BOTTOM }], R));
+  const slots: QueueSlot[] = [0, 1, 2, 3, 4].map((i) => {
+    const pos = { x: DOCK_FRONT_X + i * 134, y: DOCK_Y };
+    const merge = { x: pos.x - R, y: DOCK_EXIT_Y };
+    return { kind: 'queue', pos, s: entry.project(pos), out: new Track(rounded([pos, { x: pos.x, y: DOCK_EXIT_Y }, merge], R)), mergeS: exit.project(merge) };
+  });
+  const spots = slots.map((q) => q.s).sort((a, b) => a - b);
+  entry.splits = spots.slice(1).map((v, i) => (v + spots[i]) / 2);
+  return {
+    track: entry,
+    exit,
+    slots,
+    entryLoopS: LOOP.project(entry.pts[0]),
+    exitLoopS: LOOP.project(exit.pts[exit.pts.length - 1]),
+    junctions: [{ x: xIn, y: LANE_BOTTOM }, { x: xOut, y: LANE_BOTTOM }],
+  };
+}
 export const FREIGHT_LOAD: Point = { x: 150, y: 770 };
 
 /** Storage yard: belt along the top, crane field below. */
@@ -270,44 +312,16 @@ export const NET: Record<Area, ZoneNet> = {
   intake: hopperLine(),
   working: zone(topZoneTrack(310, 1530, TOP_BUS), (t) => TOP_ROWS.flatMap((y) => MACHINE_COLUMNS.map((x) => stubSlot(t, TOP_BUS, 1, { x, y })))),
   freight: zone(bottomZoneTrack(230, 60, FREIGHT_LOAD.y), (t) => trackSlots(t, [FREIGHT_LOAD])),
-  dock: zone(bottomZoneTrack(1100, 330, DOCK_Y), (t) => trackSlots(t, [0, 1, 2, 3, 4].map((i) => ({ x: DOCK_FRONT_X + i * 134, y: DOCK_Y })))),
+  dock: dockYard(),
   storage: zone(bottomZoneTrack(1540, 1180, YARD.busY), craneYard),
 };
 
 export const HOPPER_S = 0;
 
-export interface Gate {
-  zone: Area;
-  /** Where the bar crosses the belt. */
-  at: Point;
-  /** Distance of the gate along its zone belt; it bounds the front queue section. */
-  s: number;
-  /** Direction the belt runs at the gate. */
-  belt: 'h' | 'v';
-  label: string[];
-}
-
-/** Gates sit where crates wait, and say why they are waiting. They lift while the belt carries something. */
-export const GATES: Gate[] = [
-  { zone: 'dock' as const, at: { x: DOCK_FRONT_X - 72, y: DOCK_Y }, belt: 'h' as const, label: ['waiting', 'on you'] },
-  { zone: 'intake' as const, at: { x: HOPPER_DROP.x, y: 375 }, belt: 'v' as const, label: ['awaiting', 'prompt'] },
-].map((g) => ({ ...g, s: NET[g.zone].track.project(g.at) }));
-
-/**
- * Queue belts are accumulation conveyors: one section per queue spot, plus the gate, so a crate joining
- * the back runs only the sections behind the queue and the crates in front stay put.
- */
-for (const g of GATES) {
-  const track = NET[g.zone].track;
-  const spots = NET[g.zone].slots.map((sl) => (sl.kind === 'track' ? sl.s : 0)).sort((a, b) => a - b);
-  const mids = spots.slice(1).map((s, i) => (s + spots[i]) / 2);
-  track.splits = [...mids, g.s].sort((a, b) => a - b);
-}
-
 /** Draw order: slot branches under zone belts, zone belts under the main loop. */
 export const ALL_TRACKS: Track[] = [
-  ...Object.values(NET).flatMap((z) => z.slots.flatMap((s) => (s.kind === 'stub' ? [s.in, s.out] : []))),
-  ...Object.values(NET).map((z) => z.track),
+  ...Object.values(NET).flatMap((z) => z.slots.flatMap((s) => (s.kind === 'stub' ? [s.in, s.out] : s.kind === 'queue' ? [s.out] : []))),
+  ...Object.values(NET).flatMap((z) => (z.exit ? [z.exit, z.track] : [z.track])),
   LOOP,
 ];
 
@@ -328,6 +342,7 @@ function leave(zoneName: Area, slot: number): Waypoint[] {
   const s = z.slots[slot];
   if (s.kind === 'stub') return [s.pos, ...on(s.out, s.out.pts), ...on(z.track, z.track.between(s.mergeS, z.track.total))];
   if (s.kind === 'crane') return [s.pos, s.drop, ...on(z.track, z.track.between(s.dropS, z.track.total))];
+  if (s.kind === 'queue') return [s.pos, ...on(s.out, s.out.pts), ...on(z.exit!, z.exit!.between(s.mergeS, z.exit!.total))];
   return on(z.track, z.track.between(s.s, z.track.total));
 }
 
@@ -350,7 +365,8 @@ export function travel(from: SlotRef, to: SlotRef): Waypoint[] {
   const b = NET[to.zone].slots[to.slot];
   if (from.zone === to.zone && from.slot === to.slot) return [b.pos];
   if (from.zone === to.zone && a.kind === 'crane' && b.kind === 'crane') return [a.pos, b.pos];
-  if (from.zone === to.zone && a.kind === 'track' && b.kind === 'track' && b.s >= a.s) {
+  const onSameBelt = (a.kind === 'track' || a.kind === 'queue') && (b.kind === 'track' || b.kind === 'queue');
+  if (from.zone === to.zone && onSameBelt && b.s >= a.s) {
     return [...on(NET[to.zone].track, NET[to.zone].track.between(a.s, b.s)), b.pos];
   }
   return [...leave(from.zone, from.slot), ...on(LOOP, LOOP.between(NET[from.zone].exitLoopS, NET[to.zone].entryLoopS)), ...arrive(to.zone, to.slot)];
