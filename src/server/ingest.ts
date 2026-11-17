@@ -14,15 +14,31 @@ export class EventIngestor {
     private readonly registry: Registry,
   ) {}
 
+  /**
+   * Drains on every change the folder watcher reports; anything it missed is picked up by the next event or a page
+   * load (main.ts). Only if no watcher can run at all does polling take over, as the only way events get in.
+   */
   start(): void {
     fs.mkdirSync(this.dir, { recursive: true });
     this.drain();
+    if (!this.watch()) this.timer = setInterval(() => this.drain(), 1500);
+  }
+
+  private watch(): boolean {
     try {
+      fs.mkdirSync(this.dir, { recursive: true });
       this.watcher = fs.watch(this.dir, () => this.drain());
+      this.watcher.on('error', () => {
+        // e.g. the folder was deleted: start over (the sweep re-creates the watcher) and pick up what's waiting.
+        this.watcher?.close();
+        this.watcher = undefined;
+        if (this.watch()) this.drain();
+      });
+      return true;
     } catch {
-      // polling below still picks events up
+      this.watcher = undefined;
+      return false;
     }
-    this.timer = setInterval(() => this.drain(), 1500);
   }
 
   stop(): void {

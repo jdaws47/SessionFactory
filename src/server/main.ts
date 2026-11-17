@@ -60,8 +60,30 @@ function requireTerminals(): void {
   if (!terminalsAvailable) throw new HttpError(501, 'tmux is not installed');
 }
 
-function liveTerminal(c: Crate): boolean {
-  return !!c.slot && terminals.liveSlots.has(c.slot);
+/** Whether a crate's factory terminal is running, checked with tmux at the moment it matters. */
+async function liveTerminal(c: Crate): Promise<boolean> {
+  if (!c.slot) return false;
+  await terminals.refresh();
+  return terminals.liveSlots.has(c.slot);
+}
+
+/**
+ * Factory terminals close by themselves when their claude exits (the shell runs `; exit`). When a crate with a
+ * terminal moves to storage, check tmux once, shortly after, so the crate stops offering its terminal.
+ */
+const closing = new Set<string>();
+function noticeEndedTerminals(): void {
+  for (const c of registry.all()) {
+    if (c.zone !== 'storage' || !c.slot || !terminals.liveSlots.has(c.slot) || closing.has(c.slot)) continue;
+    const slot = c.slot;
+    closing.add(slot);
+    setTimeout(() => {
+      void terminals.refresh().then((changed) => {
+        if (!terminals.liveSlots.has(slot)) closing.delete(slot);
+        if (changed) broadcast();
+      });
+    }, 3000);
+  }
 }
 
 /** Starts a fresh factory terminal for a new crate; a name becomes the Claude session's name (--name). */
@@ -78,7 +100,7 @@ app.route('GET', '/api/state', () => state());
 
 /** Ends a crate's factory terminal (clean /exit when Claude is idle) and moves the crate to storage. */
 async function endSession(crate: Crate): Promise<void> {
-  if (!crate.slot || !liveTerminal(crate)) return;
+  if (!crate.slot || !(await liveTerminal(crate))) return;
   await terminals.end(crate.slot, crate.zone === 'dock' || crate.zone === 'intake');
   registry.markEnded(crate.id, Date.now());
   broadcast();
@@ -86,7 +108,7 @@ async function endSession(crate: Crate): Promise<void> {
 
 app.route('POST', '/api/crates/:id/end', async (_b, { id }) => {
   const crate = crateOr404(id);
-  if (!liveTerminal(crate)) throw new HttpError(409, 'This crate has no factory terminal to end.');
+  if (!(await liveTerminal(crate))) throw new HttpError(409, 'This crate has no factory terminal to end.');
   await endSession(crate);
 });
 
@@ -106,7 +128,7 @@ app.route('POST', '/api/crates/:id/rename', async (body, { id }) => {
   const crate = crateOr404(id);
   const name = String(body.name ?? '').replace(/\s+/g, ' ').trim();
   if (!name) throw new HttpError(400, 'A name is needed.');
-  if (!liveTerminal(crate)) throw new HttpError(409, 'This session runs outside the factory: rename it in its own terminal with /rename.');
+  if (!(await liveTerminal(crate))) throw new HttpError(409, 'This session runs outside the factory: rename it in its own terminal with /rename.');
   if (crate.zone !== 'dock' && crate.zone !== 'intake') throw new HttpError(409, 'Claude is busy in this session; rename it once it is waiting for you.');
   await terminals.sendLine(crate.slot!, `/rename ${name}`);
   registry.setTitle(id, name);
@@ -129,7 +151,7 @@ app.route('POST', '/api/terminals', (body) =>
 app.route('POST', '/api/crates/:id/resume', async (_b, { id }) => {
   requireTerminals();
   const crate = crateOr404(id);
-  if (liveTerminal(crate)) return { slot: crate.slot };
+  if (await liveTerminal(crate)) return { slot: crate.slot };
   const blocked = handoffBlocker(crate, isAlive);
   if (blocked) throw new HttpError(409, blocked);
   const sessionId = crate.sessionIds[crate.sessionIds.length - 1];
@@ -203,9 +225,12 @@ async function importHistory(): Promise<{ added: number; scanned: number }> {
 
 app.route('POST', '/api/history/import', () => importHistory());
 
-app.socket('/ws', (ws) => {
+app.socket('/ws', async (ws) => {
   clients.add(ws);
   ws.on('close', () => clients.delete(ws));
+  // A page (re)load catches up: any hook event a watcher missed, and terminals closed while nobody was looking.
+  ingestor.drain();
+  await terminals.refresh();
   ws.send(JSON.stringify({ type: 'state', state: state() }));
 });
 
@@ -218,7 +243,10 @@ app.socket('/ws/term/:slot', (ws, { slot }, query) => {
   const rows = Math.min(200, Math.max(5, Number(query.get('rows')) || 32));
   const term = terminals.attach(slot, cols, rows);
   term.onData((d) => ws.readyState === ws.OPEN && ws.send(d));
-  term.onExit(() => ws.close());
+  term.onExit(() => {
+    ws.close();
+    void terminals.refresh().then((changed) => changed && broadcast());
+  });
   ws.on('message', (raw) => {
     try {
       const msg = JSON.parse(raw.toString());
@@ -231,12 +259,14 @@ app.socket('/ws/term/:slot', (ws, { slot }, query) => {
   ws.on('close', () => term.kill());
 });
 
-registry.onChange(broadcast);
+registry.onChange(() => {
+  broadcast();
+  noticeEndedTerminals();
+});
 ingestor.start();
 await terminals.refresh();
-const liveness = setInterval(() => registry.checkLiveness(isAlive, Date.now()), 5000);
-const slotWatch = setInterval(() => void terminals.refresh().then((changed) => changed && broadcast()), 2000);
-const tick = setInterval(broadcast, 30_000);
+// No hook fires when a session dies without ending (crash, terminal closed), so this one check stays a poll.
+const liveness = setInterval(() => registry.checkLiveness(isAlive, Date.now()), 60_000);
 const jiraPoll = setInterval(() => void pollJira(), 5 * 60_000);
 setTimeout(() => void pollJira(), 5000);
 
@@ -250,8 +280,6 @@ if (!jira.configured) console.log('  Jira not configured (no JIRA_*/ATLASSIAN_* 
 
 function shutdown(): void {
   clearInterval(liveness);
-  clearInterval(slotWatch);
-  clearInterval(tick);
   clearInterval(jiraPoll);
   ingestor.stop();
   registry.close();
