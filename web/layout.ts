@@ -102,7 +102,7 @@ function contents(area: Area): Rect[] {
         ...belts,
         ...(z.recycle ? beltInside(z.recycle.track, false) : []),
         // Operator, workbench, retro computer and mug.
-        { x: OPERATOR.x - 12, y: OPERATOR.y - 40, w: 140, h: 66 },
+        { x: OPERATOR.x - 12, y: OPERATOR.y - 33, w: 112, h: 57 },
       ];
     case 'storage':
       return [...crates, ...belts, { x: YARD.rails.left - 4, y: YARD.rails.top - 6, w: YARD.rails.right - YARD.rails.left + 8, h: YARD.rails.bottom - YARD.rails.top + 12 }];

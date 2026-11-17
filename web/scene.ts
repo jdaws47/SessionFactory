@@ -702,30 +702,25 @@ function drawOperator(ctx: CanvasRenderingContext2D, t: number): void {
   ctx.shadowColor = 'rgba(0,0,0,0.5)';
   ctx.shadowBlur = 8;
   ctx.shadowOffsetY = 3;
-  fillSquircle(ctx, bx, by, 104, 36, RADIUS.small, '#8b939e');
+  fillSquircle(ctx, bx, by, 78, 32, RADIUS.small, '#8b939e');
   ctx.restore();
-  fillSquircle(ctx, bx, by, 104, 4, 2, C.orange);
-  // Retro beige desktop: keyboard base with a chunky CRT monitor sitting on it.
+  fillSquircle(ctx, bx, by, 78, 4, 2, C.orange);
+  // Retro beige CRT monitor standing on the bench.
   const beige = '#d9cfb4';
-  const beigeDark = '#b9ad8f';
-  fillSquircle(ctx, bx + 6, by + 14, 62, 20, 3, beigeDark);
-  fillSquircle(ctx, bx + 6, by + 12, 62, 18, 3, beige);
-  ctx.fillStyle = '#9b9177';
-  for (let row = 0; row < 3; row++) for (let k = 0; k < 9; k++) ctx.fillRect(bx + 11 + k * 6, by + 16 + row * 4, 4, 2);
   ctx.save();
   ctx.shadowColor = 'rgba(0,0,0,0.45)';
   ctx.shadowBlur = 6;
   ctx.shadowOffsetY = 3;
-  fillSquircle(ctx, bx + 12, by - 30, 50, 42, 5, beige);
+  fillSquircle(ctx, bx + 8, by - 16, 38, 32, 5, beige);
   ctx.restore();
-  fillSquircle(ctx, bx + 12, by + 6, 50, 6, 2, beigeDark);
-  fillSquircle(ctx, bx + 17, by - 25, 40, 29, 6, '#0b120d');
+  fillSquircle(ctx, bx + 8, by + 11, 38, 5, 2, '#b9ad8f');
+  fillSquircle(ctx, bx + 12, by - 12, 30, 21, 5, '#0b120d');
   ctx.fillStyle = '#4ade80';
-  for (const [w, row] of [[26, 0], [18, 1], [30, 2]] as const) ctx.fillRect(bx + 22, by - 20 + row * 6, w, 2);
-  if (Math.floor(t / 530) % 2 === 0) ctx.fillRect(bx + 22, by - 2, 4, 3);
+  for (const [w, row] of [[18, 0], [12, 1], [20, 2]] as const) ctx.fillRect(bx + 16, by - 8 + row * 5, w, 2);
+  if (Math.floor(t / 530) % 2 === 0) ctx.fillRect(bx + 16, by + 6, 3, 2);
   // Coffee mug: white with an orange band, coffee inside, a handle, and a little steam.
-  const mx = bx + 88;
-  const my = by + 18;
+  const mx = bx + 62;
+  const my = by + 16;
   fillSquircle(ctx, mx + 7, my - 3, 6, 6, 2, '#e7e5e4');
   fillSquircle(ctx, mx - 7, my - 7, 14, 14, 5, '#f5f5f4');
   fillSquircle(ctx, mx - 7, my - 1, 14, 4, 1.5, C.orange);
