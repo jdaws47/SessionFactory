@@ -16,7 +16,7 @@ interface Particle {
 }
 
 /** Seconds between puffs while a source is active (belches come in bursts instead). */
-const EVERY: Record<SmokeStyle, number> = { stack: 1.05, engine: 0.55, belch: 1.6 };
+const EVERY: Record<SmokeStyle, number> = { stack: 1.05, engine: 0.16, belch: 1.6 };
 
 /**
  * Smoke as particles. Sources say each frame whether they are active; active sources release puffs, and every
@@ -42,10 +42,12 @@ export class Smoke {
     if (src.since < EVERY[style]) return;
     src.since = 0;
     const burst = style === 'belch' ? 3 : 1;
+    // Engine puffs jitter a little so a moving train leaves an uneven trail rather than a dotted line.
+    const jitter = () => (style === 'engine' ? (Math.random() - 0.5) * 8 : 0);
     for (let k = 0; k < burst; k++) {
       this.particles.push({
-        x: at.x + (style === 'belch' ? (k - 1) * 5 : 0),
-        y: at.y,
+        x: at.x + (style === 'belch' ? (k - 1) * 5 : 0) + jitter(),
+        y: at.y + jitter(),
         age: 0,
         life: style === 'belch' ? 1.3 : style === 'engine' ? 2.2 : 3.2,
         size: style === 'belch' ? 8 + k * 3 : 7,
@@ -53,7 +55,7 @@ export class Smoke {
         rise: style === 'belch' ? 26 + k * 8 : 30,
         drift: style === 'belch' ? 14 : 10,
         dark: style === 'belch',
-        alpha: style === 'belch' ? 0.65 : style === 'engine' ? 0.3 : 0.24,
+        alpha: style === 'belch' ? 0.65 : style === 'engine' ? 0.26 : 0.24,
       });
     }
   }
