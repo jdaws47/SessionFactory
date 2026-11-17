@@ -8,7 +8,7 @@ export const WORLD_W = W * 2;
 /** The freight train shuttles along the rail between the freight station and the warehouse platform. */
 export const TRAIN = {
   factoryX: FREIGHT.wagon.x,
-  warehouseX: WAREHOUSE_X + 260,
+  warehouseX: WAREHOUSE_X + 150,
   /** Where crates ride on the wagon (relative to the train's x). */
   wagonY: FREIGHT.wagon.y,
   railY: TRAIN_Y,

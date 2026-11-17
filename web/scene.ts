@@ -1274,7 +1274,24 @@ function paintWarehouse(g: CanvasRenderingContext2D): void {
 /** Rail from the freight station across into the warehouse, drawn over both floors. */
 function paintRail(g: CanvasRenderingContext2D): void {
   const from = AREAS.freight.x + 10;
-  const to = TRAIN.warehouseX + 150;
+  // Ends just past the far engine when the train is at the warehouse.
+  const to = TRAIN.warehouseX + 100;
+  // Ballast bed under the track so it reads against both floors.
+  g.save();
+  g.shadowColor = 'rgba(0,0,0,0.45)';
+  g.shadowBlur = 6;
+  g.shadowOffsetY = 2;
+  fillSquircle(g, from - 8, TRAIN_Y + 4, to - from + 16, 36, 6, '#2e2a26');
+  g.restore();
+  const rnd = seeded(31);
+  for (let i = 0; i < (to - from) * 0.6; i++) {
+    g.fillStyle = `rgba(200,190,175,${0.05 + rnd() * 0.08})`;
+    g.fillRect(from + rnd() * (to - from), TRAIN_Y + 7 + rnd() * 30, 2, 2);
+  }
+  g.strokeStyle = 'rgba(255,255,255,0.06)';
+  g.lineWidth = 1;
+  squirclePath(g, from - 8, TRAIN_Y + 4, to - from + 16, 36, 6);
+  g.stroke();
   g.fillStyle = '#3d3226';
   for (let x = from + 6; x < to; x += 13) {
     squirclePath(g, x - 2.5, TRAIN_Y + 10, 5, 20, 1.5);
