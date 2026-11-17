@@ -631,13 +631,19 @@ function paintScenery(g: CanvasRenderingContext2D): void {
   }
 
   const areas = Object.values(AREAS);
-  const clear = (p: Point) => !areas.some((a) => p.x > a.x - 26 && p.x < a.x + a.w + 26 && p.y > a.y - 26 && p.y < a.y + a.h + 26) && !(p.y > 380 && p.y < 500);
-  for (let i = 0; i < 260; i++) {
+  const offBelts = (p: Point) =>
+    ALL_TRACKS.every((t) => {
+      const q = t.at(t.project(p));
+      return Math.hypot(q.x - p.x, q.y - p.y) > 22;
+    });
+  const clear = (p: Point) => p.y > 8 && !areas.some((a) => p.x > a.x - 6 && p.x < a.x + a.w + 6 && p.y > a.y - 6 && p.y < a.y + a.h + 6) && offBelts(p);
+  for (let i = 0; i < 2400; i++) {
     const p = { x: rnd() * W, y: rnd() * H };
+    const plantNext = rnd() < 0.55;
     if (!clear(p)) continue;
-    if (rnd() < 0.5) {
-      const w = 6 + rnd() * 12;
-      const h = 4 + rnd() * 7;
+    if (!plantNext) {
+      const w = 5 + rnd() * 9;
+      const h = 4 + rnd() * 5;
       squirclePath(g, p.x - w / 2, p.y - h / 2, w, h, Math.min(w, h) * 0.3);
       g.fillStyle = C.rock;
       g.fill();
