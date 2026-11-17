@@ -39,16 +39,16 @@ export const CRATE_H = 56;
 export const AREAS: Record<Area, AreaDef> = {
   intake: { x: 65, y: 36, w: 160, h: 334, title: 'INTAKE', subtitle: 'new' },
   working: { x: 290, y: 36, w: 1280, h: 334, title: 'ASSEMBLY HALL', subtitle: 'claude is working · jammed machines need you' },
-  freight: { x: 30, y: 510, w: 230, h: 360, title: 'FREIGHT', subtitle: 'archive' },
-  dock: { x: 300, y: 510, w: 830, h: 290, title: 'LOADING DOCK', subtitle: 'waiting on you' },
-  storage: { x: 1160, y: 510, w: 410, h: 360, title: 'STORAGE', subtitle: 'session ended' },
+  freight: { x: 80, y: 510, w: 220, h: 330, title: 'FREIGHT', subtitle: 'archive' },
+  dock: { x: 325, y: 510, w: 820, h: 290, title: 'LOADING DOCK', subtitle: 'waiting on you' },
+  storage: { x: 1170, y: 510, w: 390, h: 290, title: 'STORAGE', subtitle: 'session ended' },
 };
 
 /** The hopper's mouth sits just above where new crates land on the intake belt (belts.HOPPER_DROP). */
 export const HOPPER: Rect = { x: 85, y: 88, w: 120, h: 84 };
-export const TRAIN_Y = 808;
+export const TRAIN_Y = 796;
 /** The operator stands between the dock queue and its recycle belt, at the front. */
-export const OPERATOR: Point = { x: 440, y: 700 };
+export const OPERATOR: Point = { x: 460, y: 700 };
 
 export function inRect(p: Point, r: Rect): boolean {
   return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;

@@ -257,11 +257,11 @@ const TOP_ROWS = [148, 292];
 export const MACHINE_COLUMNS = [450, 675, 900, 1125, 1350];
 
 export const HOPPER_DROP: Point = { x: 145, y: 196 };
-export const DOCK_FRONT_X = 440;
+export const DOCK_FRONT_X = 460;
 export const DOCK_Y = 630;
 export const RECYCLE_Y = 760;
-export const DOCK_IN_X = 1100;
-export const DOCK_OUT_X = 330;
+export const DOCK_IN_X = 1120;
+export const DOCK_OUT_X = 350;
 
 /**
  * The loading dock: in-leg down from the loop, a queue running left past the operator, out-leg back up.
@@ -288,13 +288,14 @@ function dockLine(): ZoneNet {
  * crane lowers crates into the wagon on the tracks below (and lifts them back out).
  */
 export const FREIGHT = {
-  busY: 700,
-  inX: 177,
+  busY: 690,
+  /** The out-leg sits as far left as the loop allows; the platform is centred between the legs. */
+  inX: 267,
   outX: 113,
-  transfer: { x: 145, y: 700 },
-  wagon: { x: 145, y: 796 },
-  rails: { left: 87, right: 203, top: 680, bottom: 830 },
-  home: { x: 145, y: 748 },
+  transfer: { x: 190, y: 690 },
+  wagon: { x: 190, y: 784 },
+  rails: { left: 136, right: 244, top: 670, bottom: 815 },
+  home: { x: 190, y: 737 },
 };
 
 /** Storage yard: belt along the top, crane field below. */
@@ -307,9 +308,9 @@ export const YARD = {
   pickup: { x: 1365, y: 572 },
   drop: { x: 1365, y: 572 },
   columns: [1239, 1365, 1491],
-  rows: [656, 734, 812],
+  rows: [650, 728],
   /** Rails stand just outside the belt's legs with a small gap. */
-  rails: { left: 1216, right: 1514, top: 552, bottom: 852 },
+  rails: { left: 1216, right: 1514, top: 552, bottom: 766 },
   /** Where the crane parks between jobs: between the belt and the first row, under the transfer point. */
   home: { x: 1365, y: 607 },
 };
