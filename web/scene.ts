@@ -582,8 +582,8 @@ function machineBack(ctx: CanvasRenderingContext2D, pos: Point, t: number, index
 function machineFront(ctx: CanvasRenderingContext2D, pos: Point, t: number, crate: CrateView | undefined): void {
   const active = !!crate;
   const color = active ? C.amber : '#5b5f66';
-  cog(ctx, pos.x - MACHINE_W / 2 + 10, pos.y + 6, 22, active ? t / 2400 : 0, color);
-  cog(ctx, pos.x + MACHINE_W / 2 - 10, pos.y + 6, 22, active ? -t / 2400 : 0, color);
+  cog(ctx, pos.x - MACHINE_W / 2 + 10, pos.y + 6, 22, active ? t / 750 : 0, color);
+  cog(ctx, pos.x + MACHINE_W / 2 - 10, pos.y + 6, 22, active ? -t / 750 : 0, color);
   if (!crate) return;
   const sign = crate.waitingOn ? `⏳ ${crate.waitingOn}` : crate.lastTool;
   if (!sign) return;

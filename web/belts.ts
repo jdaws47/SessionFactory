@@ -125,6 +125,8 @@ export interface ZoneNet {
   slots: Slot[];
   entryLoopS: number;
   exitLoopS: number;
+  /** Where the zone belt branches off the loop and where it rejoins it. */
+  junctions: [Point, Point];
 }
 
 /** The main loop runs clockwise: top lane flows right, bottom lane flows left. */
@@ -189,6 +191,7 @@ function zone(points: Point[], makeSlots: (t: Track) => Slot[]): ZoneNet {
     slots: makeSlots(track),
     entryLoopS: LOOP.project(track.pts[0]),
     exitLoopS: LOOP.project(track.pts[track.pts.length - 1]),
+    junctions: [points[1], points[points.length - 2]],
   };
 }
 
@@ -237,7 +240,7 @@ export const ALL_TRACKS: Track[] = [
 ];
 
 /** Where zone belts split off and merge into the loop (drawn as splitter/merger blocks). */
-export const JUNCTIONS: Point[] = Object.values(NET).flatMap((z) => [z.track.pts[0], z.track.pts[z.track.pts.length - 1]]);
+export const JUNCTIONS: Point[] = Object.values(NET).flatMap((z) => z.junctions);
 
 function leave(zoneName: Area, slot: number): Point[] {
   const z = NET[zoneName];

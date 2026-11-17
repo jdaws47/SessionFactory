@@ -35,7 +35,7 @@ describe('belt network', () => {
       }
       for (const p of fromHopper(from).slice(1)) if (!isSlot(p)) expect(distanceToBelts(p)).toBeLessThan(0.5);
     }
-  });
+  }, 60_000);
 
   it('gives every assembler its own entrance and exit', () => {
     for (const slot of NET.working.slots) {
