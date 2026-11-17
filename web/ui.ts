@@ -282,10 +282,7 @@ export class Ui {
                   kind: 'danger' as const,
                   run: async () => {
                     const busy = c.zone === 'working' || c.zone === 'alert';
-                    const question = busy
-                      ? `Claude is in the middle of a turn in "${c.label}". End the session anyway? This interrupts it and closes the terminal.`
-                      : `End the session in "${c.label}" and close its terminal? You can resume it later from Storage.`;
-                    if (!window.confirm(question)) return;
+                    if (busy && !window.confirm(`Claude is in the middle of a turn in "${c.label}". End the session anyway? This interrupts it and closes the terminal.`)) return;
                     this.toast('Ending session…');
                     await post(`/api/crates/${c.id}/end`);
                     this.toast(`${c.label} ended`);
