@@ -538,6 +538,12 @@ export class Ui {
     this.toast(`${c.label} is back on the floor`);
   }
 
+  private warehouseSort: 'recent' | 'name' = 'recent';
+
+  /**
+   * The Warehouse: shelves of archived crates, one shelf per month archived (or per first letter when sorted by
+   * name). Each shelf is a dense grid of crate tiles so nothing gets a row to itself.
+   */
   private renderWarehouse(keepFocus = false): void {
     const s = this.state;
     if (!this.warehouseOpen || !s) {
@@ -545,40 +551,41 @@ export class Ui {
       return;
     }
     const q = this.warehouseQuery.trim().toLowerCase();
-    const archived = s.crates
-      .filter((c) => c.archived)
-      .filter((c) => !q || [c.label, c.jiraKey, c.firstPrompt, c.lastMessage, new Date(c.archivedAt ?? 0).toLocaleDateString()].some((f) => f?.toLowerCase().includes(q)))
-      .sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0));
-    const groups = new Map<string, CrateView[]>();
-    for (const c of archived) groups.set(c.label, [...(groups.get(c.label) ?? []), c]);
+    const all = s.crates.filter((c) => c.archived);
+    const archived = all
+      .filter((c) => !q || [c.label, c.jiraKey, c.lastMessage, new Date(c.archivedAt ?? 0).toLocaleDateString()].some((f) => f?.toLowerCase().includes(q)))
+      .sort((a, b) => (this.warehouseSort === 'name' ? a.label.localeCompare(b.label) : (b.archivedAt ?? 0) - (a.archivedAt ?? 0)));
+    const shelfOf = (c: CrateView) =>
+      this.warehouseSort === 'name'
+        ? (c.label.match(/[a-z0-9]/i)?.[0] ?? '#').toUpperCase()
+        : new Date(c.archivedAt ?? 0).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    const shelves = new Map<string, CrateView[]>();
+    for (const c of archived) shelves.set(shelfOf(c), [...(shelves.get(shelfOf(c)) ?? []), c]);
 
-    const shelves = [...groups.entries()]
-      .map(([label, crates]) => {
-        const bringAll =
-          crates.length > 1
-            ? this.button({
-                label: `Bring back all (${crates.length})`,
-                run: async () => {
-                  for (const c of crates) await post(`/api/crates/${c.id}/unarchive`);
-                  this.toast(`${label} pallet is back on the floor`);
-                },
-              })
-            : '';
-        return `<section class="shelf">
-          <div class="shelf-head"><h3>${esc(label)}</h3>${bringAll}</div>
-          <div class="shelf-row">${crates.map((c) => this.warehouseCard(c, s)).join('')}</div>
-        </section>`;
-      })
+    const body = [...shelves.entries()]
+      .map(
+        ([name, crates]) => `<section class="wh-shelf">
+          <div class="wh-sign"><span>${esc(name)}</span><span class="dim">${crates.length}</span></div>
+          <div class="wh-rack">${crates.map((c) => this.warehouseTile(c, s)).join('')}</div>
+        </section>`,
+      )
       .join('');
 
     const search = this.warehouse.querySelector<HTMLInputElement>('#wh-search');
     const caret = search?.selectionStart ?? null;
     const hadFocus = !!search && document.activeElement === search;
+    const sortBtn = (key: 'recent' | 'name', label: string) =>
+      `<button class="seg ${this.warehouseSort === key ? 'on' : ''}" ${this.act(() => {
+        this.warehouseSort = key;
+        this.renderWarehouse();
+      })}>${label}</button>`;
     this.warehouse.innerHTML = `
       <div class="wh-inner">
-        <header>
+        <header class="wh-bar">
           <h2>WAREHOUSE</h2>
+          <span class="dim wh-count">${archived.length}${q ? ` of ${all.length}` : ''} crate${all.length === 1 ? '' : 's'}</span>
           <input id="wh-search" placeholder="Search name, ticket, date…" value="${esc(this.warehouseQuery)}" />
+          <span class="segs">${sortBtn('recent', 'Recent')}${sortBtn('name', 'A–Z')}</span>
           ${this.button({
             label: 'Import older sessions',
             run: async () => {
@@ -588,7 +595,7 @@ export class Ui {
           })}
           <button class="icon" ${this.act(() => this.closeWarehouse())} title="Close">✕</button>
         </header>
-        ${shelves || `<p class="empty">${q ? 'Nothing matches that search.' : 'Nothing archived yet. Archive a crate from its window and it ships here.'}</p>`}
+        ${body || `<p class="empty">${q ? 'Nothing matches that search.' : 'Nothing archived yet. Archive a crate from its window and it ships here.'}</p>`}
       </div>`;
     this.warehouse.hidden = false;
     if (keepFocus && hadFocus) {
@@ -598,25 +605,28 @@ export class Ui {
     }
   }
 
-  private warehouseCard(c: CrateView, s: FactoryState): string {
-    const actions: Action[] = [
-      { label: 'Bring back', kind: 'primary', run: () => this.bringBack(c) },
-      ...(s.features.terminals
-        ? [
-            { label: 'Resume', run: () => this.resume(c) },
-            { label: 'New session, same label', run: () => this.continueLabel(c) },
-          ]
-        : [{ label: 'Copy resume cmd', run: () => this.copy(resumeCommand(c, s.cleanRoot), 'Resume command') }]),
-    ];
-    return `<article class="wh-card ${c.returned ? 'returned' : ''}">
-      <div class="wh-top"><span class="dot" style="background:${crateColor(c.id)}"></span>
-        <span class="dim">archived ${esc(new Date(c.archivedAt ?? 0).toLocaleDateString())}</span>
-        ${c.archiveCount > 1 || c.reactivationCount ? `<span class="dim">· round ${c.archiveCount}</span>` : ''}
-        ${c.jiraKey && c.jiraKey !== c.label ? `<span class="dim">· ${esc(c.jiraKey)}</span>` : ''}
+  /** One archived crate on the shelf: crate-tinted tile with its name, ticket, date and small actions. */
+  private warehouseTile(c: CrateView, s: FactoryState): string {
+    const icon = (glyph: string, title: string, run: () => void | Promise<void>, primary = false) =>
+      `<button class="tile-btn ${primary ? 'primary' : ''}" title="${esc(title)}" aria-label="${esc(title)}" ${this.act(run)}>${glyph}</button>`;
+    const actions = s.features.terminals
+      ? [
+          icon('▶', 'Resume this conversation in a factory terminal', () => this.resume(c), true),
+          icon('↑', 'Bring back to the floor (no terminal)', () => this.bringBack(c)),
+          icon('✚', 'New session with the same name, primed with how this one ended', () => this.continueLabel(c)),
+        ]
+      : [icon('↑', 'Bring back to the floor', () => this.bringBack(c), true), icon('⧉', 'Copy resume command', () => this.copy(resumeCommand(c, s.cleanRoot), 'Resume command'))];
+    const date = new Date(c.archivedAt ?? 0).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const hint = c.lastMessage ? ` title="${esc(c.lastMessage.slice(0, 300))}"` : '';
+    return `<article class="wh-tile ${c.returned ? 'returned' : ''}" style="--crate:${crateColor(c.id, 50)}"${hint}>
+      <div class="wh-name">${esc(c.label)}</div>
+      <div class="wh-meta">
+        ${c.jiraKey && c.jiraKey !== c.label ? `<span class="wh-tag">${esc(c.jiraKey)}</span>` : ''}
+        <span class="dim">${esc(date)}</span>
+        ${c.archiveCount > 1 ? `<span class="dim">· ×${c.archiveCount}</span>` : ''}
       </div>
-      ${c.returned ? `<div class="returned-badge">returned: ${esc(c.returned.reason)}</div>` : ''}
-      ${c.lastMessage ? `<p class="quote dim clamp">${esc(c.lastMessage)}</p>` : ''}
-      <div class="row wrap">${actions.map((a) => this.button(a)).join('')}</div>
+      ${c.returned ? `<div class="returned-badge">${esc(c.returned.reason)}</div>` : ''}
+      <div class="wh-actions">${actions.join('')}</div>
     </article>`;
   }
 }
