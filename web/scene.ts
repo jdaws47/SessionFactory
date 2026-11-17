@@ -1,5 +1,5 @@
 import type { CrateView } from '../src/shared/types';
-import { ALL_TRACKS, BELT_SPEED, FREIGHT_LOAD, fromHopper, type Gate, GATES, HOPPER_DROP, JUNCTIONS, LOOP, NET, type SlotRef, type Track, travel, YARD } from './belts';
+import { ALL_TRACKS, BELT_SPEED, FREIGHT_LOAD, fromHopper, type Gate, GATES, HOPPER_DROP, JUNCTIONS, LOOP, NET, type SlotRef, type Track, travel, type Waypoint, YARD } from './belts';
 import { AREAS, type Area, CRATE_H, CRATE_W, floorArea, H, HOPPER, OPERATOR, type Point, TRAIN_Y, W } from './layout';
 import { squircleAt, squirclePath } from './shapes';
 
@@ -31,7 +31,7 @@ const C = {
 const RADIUS = { crate: 14, small: 4, medium: 7, large: 12 };
 
 interface Leg {
-  path: Point[];
+  path: Waypoint[];
   to: SlotRef;
 }
 
@@ -42,7 +42,7 @@ interface Sprite {
   at: SlotRef;
   /** Where the trip it is on right now ends. */
   currentTo: SlotRef;
-  path: Point[];
+  path: Waypoint[];
   /** At most one trip is queued behind the current one, so rapid state changes never pile up detours. */
   next?: Leg;
   leaving: boolean;
@@ -248,18 +248,7 @@ export class Scene {
     for (const s of this.sprites.values()) {
       if (!s.path.length && !s.next) continue;
       const target = s.path[0] ?? s.next?.path[0];
-      const heading = target ? Math.atan2(target.y - s.y, target.x - s.x) : NaN;
-      let near: Track | undefined;
-      for (const t of ALL_TRACKS) {
-        const q = t.at(t.project(s));
-        if (Math.hypot(q.x - s.x, q.y - s.y) >= 3) continue;
-        near ??= t;
-        // Where a branch overlaps the belt it splits from, pick the one the crate is actually travelling along.
-        if (Number.isFinite(heading) && Math.cos(q.angle - heading) > 0.7) {
-          near = t;
-          break;
-        }
-      }
+      const near = target?.track;
       if (near) this.running.add(near);
       else if (s.x > yard.x && s.x < yard.x + yard.w && s.y > YARD.busY - 2 && s.y < yard.y + yard.h) {
         this.craneBusy = true;

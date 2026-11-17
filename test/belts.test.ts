@@ -57,6 +57,14 @@ describe('belt network', () => {
     expect(new Set(pts.slice(0, -1).map((p) => Math.round(p.x)))).toEqual(new Set([145]));
   });
 
+  it("tags every leg with its own belt, so passing a zone's merge never counts as riding that zone's belt", () => {
+    for (const from of allSlots.filter((s) => s.zone !== 'intake')) {
+      for (const to of destinations) expect(travel(from, to).some((p) => p.track === NET.intake.track)).toBe(false);
+    }
+    const toWork = travel({ zone: 'dock', slot: 0 }, { zone: 'working', slot: 0 });
+    expect(toWork.some((p) => p.track === LOOP)).toBe(true);
+  });
+
   it('the loop is closed', () => {
     const start = LOOP.at(0);
     const end = LOOP.at(LOOP.total - 0.001);

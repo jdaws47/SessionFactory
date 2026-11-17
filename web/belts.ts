@@ -286,20 +286,29 @@ export const ALL_TRACKS: Track[] = [
 /** Where zone belts split off and merge into the loop (drawn as splitter/merger blocks). */
 export const JUNCTIONS: Point[] = Object.values(NET).flatMap((z) => z.junctions);
 
-function leave(zoneName: Area, slot: number): Point[] {
-  const z = NET[zoneName];
-  const s = z.slots[slot];
-  if (s.kind === 'stub') return [s.pos, ...s.out.pts, ...z.track.between(s.mergeS, z.track.total)];
-  if (s.kind === 'crane') return [s.pos, s.drop, ...z.track.between(s.dropS, z.track.total)];
-  return z.track.between(s.s, z.track.total);
+/** A point on a crate's route, tagged with the belt carrying it there (none for crane lifts, slots, the hopper drop). */
+export interface Waypoint extends Point {
+  track?: Track;
 }
 
-function arrive(zoneName: Area, slot: number): Point[] {
+function on(track: Track, pts: Point[]): Waypoint[] {
+  return pts.map((p) => ({ x: p.x, y: p.y, track }));
+}
+
+function leave(zoneName: Area, slot: number): Waypoint[] {
   const z = NET[zoneName];
   const s = z.slots[slot];
-  if (s.kind === 'stub') return [...z.track.between(0, s.divergeS), ...s.in.pts, s.pos];
-  if (s.kind === 'crane') return [...z.track.between(0, s.pickupS), s.pickup, s.pos];
-  return [...z.track.between(0, s.s), s.pos];
+  if (s.kind === 'stub') return [s.pos, ...on(s.out, s.out.pts), ...on(z.track, z.track.between(s.mergeS, z.track.total))];
+  if (s.kind === 'crane') return [s.pos, s.drop, ...on(z.track, z.track.between(s.dropS, z.track.total))];
+  return on(z.track, z.track.between(s.s, z.track.total));
+}
+
+function arrive(zoneName: Area, slot: number): Waypoint[] {
+  const z = NET[zoneName];
+  const s = z.slots[slot];
+  if (s.kind === 'stub') return [...on(z.track, z.track.between(0, s.divergeS)), ...on(s.in, s.in.pts), s.pos];
+  if (s.kind === 'crane') return [...on(z.track, z.track.between(0, s.pickupS)), s.pickup, s.pos];
+  return [...on(z.track, z.track.between(0, s.s)), s.pos];
 }
 
 export interface SlotRef {
@@ -308,21 +317,26 @@ export interface SlotRef {
 }
 
 /** Belt path between two slots. Moving forward along the same zone belt stays on it; anything else goes round the loop. */
-export function travel(from: SlotRef, to: SlotRef): Point[] {
+export function travel(from: SlotRef, to: SlotRef): Waypoint[] {
   const a = NET[from.zone].slots[from.slot];
   const b = NET[to.zone].slots[to.slot];
   if (from.zone === to.zone && from.slot === to.slot) return [b.pos];
   if (from.zone === to.zone && a.kind === 'crane' && b.kind === 'crane') return [a.pos, b.pos];
   if (from.zone === to.zone && a.kind === 'track' && b.kind === 'track' && b.s >= a.s) {
-    return [...NET[to.zone].track.between(a.s, b.s), b.pos];
+    return [...on(NET[to.zone].track, NET[to.zone].track.between(a.s, b.s)), b.pos];
   }
-  return [...leave(from.zone, from.slot), ...LOOP.between(NET[from.zone].exitLoopS, NET[to.zone].entryLoopS), ...arrive(to.zone, to.slot)];
+  return [...leave(from.zone, from.slot), ...on(LOOP, LOOP.between(NET[from.zone].exitLoopS, NET[to.zone].entryLoopS)), ...arrive(to.zone, to.slot)];
 }
 
 /** Path for a brand-new crate dropped from the hopper onto the intake belt. */
-export function fromHopper(to: SlotRef): Point[] {
+export function fromHopper(to: SlotRef): Waypoint[] {
   const intake = NET.intake;
   const b = NET[to.zone].slots[to.slot];
-  if (to.zone === 'intake' && b.kind === 'track' && b.s >= HOPPER_S) return [HOPPER_DROP, ...intake.track.between(HOPPER_S, b.s), b.pos];
-  return [HOPPER_DROP, ...intake.track.between(HOPPER_S, intake.track.total), ...LOOP.between(intake.exitLoopS, NET[to.zone].entryLoopS), ...arrive(to.zone, to.slot)];
+  if (to.zone === 'intake' && b.kind === 'track' && b.s >= HOPPER_S) return [HOPPER_DROP, ...on(intake.track, intake.track.between(HOPPER_S, b.s)), b.pos];
+  return [
+    HOPPER_DROP,
+    ...on(intake.track, intake.track.between(HOPPER_S, intake.track.total)),
+    ...on(LOOP, LOOP.between(intake.exitLoopS, NET[to.zone].entryLoopS)),
+    ...arrive(to.zone, to.slot),
+  ];
 }
