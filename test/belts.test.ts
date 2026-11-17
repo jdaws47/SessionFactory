@@ -109,6 +109,12 @@ describe('belt network', () => {
     expect(nearInLeg.every((p) => p.y >= DOCK_Y - 25)).toBe(true);
   });
 
+  it('marks the dock recycle splitter and merger', async () => {
+    const { JUNCTIONS, DOCK_IN_X, DOCK_OUT_X, DOCK_Y } = await import('../web/belts');
+    expect(JUNCTIONS).toContainEqual({ x: DOCK_IN_X, y: DOCK_Y });
+    expect(JUNCTIONS.some((j) => j.y === DOCK_Y && j.x > DOCK_OUT_X && j.x < DOCK_OUT_X + 60)).toBe(true);
+  });
+
   it('the loading dock has at least five spots', () => {
     expect(NET.dock.slots.length).toBeGreaterThanOrEqual(5);
   });

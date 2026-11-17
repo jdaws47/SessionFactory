@@ -283,7 +283,8 @@ function dockLine(): ZoneNet {
   const merge = { x: upX - R, y: DOCK_Y };
   const track = new Track(rounded([diverge, { x: downX, y: DOCK_Y }, { x: downX, y: RECYCLE_Y }, { x: upX, y: RECYCLE_Y }, { x: upX, y: DOCK_Y }, merge], R));
   z.recycle = { track, divergeS: z.track.project(diverge), mergeS: z.track.project(merge) };
-  z.junctions = [...z.junctions, { x: downX, y: DOCK_Y }];
+  // Splitter just past the front, merger where the recycle belt meets the in-leg's corner.
+  z.junctions = [...z.junctions, { x: downX, y: DOCK_Y }, { x: upX, y: DOCK_Y }];
   return z;
 }
 
