@@ -64,6 +64,29 @@ describe('zone state machine', () => {
     expect(done.waitingOn).toBeUndefined();
   });
 
+  it('a turn that ends by asking you something stays jammed in its machine until you answer', () => {
+    const asked = run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', lastMessage: 'I found two fixes.\n\nWant me to make it?' });
+    expect(asked).toMatchObject({ zone: 'alert', alertReason: 'asked a question' });
+    // Still waiting after Claude Code's idle reminder; answering sends it back to work.
+    expect(run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', lastMessage: 'Should I?' }, { kind: 'notify', notificationType: 'idle_prompt' }).zone).toBe('alert');
+    expect(run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', lastMessage: 'Should I?' }, { kind: 'prompt', prompt: 'yes' }).zone).toBe('working');
+  });
+
+  it('a question followed by its options still counts; a question earlier in the message does not', () => {
+    const options = run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', lastMessage: 'Which one do you want?\n\n- **A:** fast\n- **B:** safe' });
+    expect(options.zone).toBe('alert');
+    const settled = run(
+      { kind: 'prompt', prompt: 'go' },
+      { kind: 'stop', lastMessage: 'Why did it lap?\n\nThe reroute waited for the dock turn-off.\n\nFixed, and all 118 tests pass.\n\nReload to see it.' },
+    );
+    expect(settled.zone).toBe('dock');
+    for (const waiting of ['Want me to pull those rows? Or I can write the tests first.', 'Tell me when the branch is ready and I\'ll start.', 'Say the word and I\'ll apply it.']) {
+      expect(run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', lastMessage: `Here is the plan.\n\n${waiting}` }).zone).toBe('alert');
+    }
+    const codeQuestion = run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', lastMessage: 'Done.\n\n```ts\nconst x = a ? b : c?\n```' });
+    expect(codeQuestion.zone).toBe('dock');
+  });
+
   it('an idle reminder does not pull a fresh session out of intake', () => {
     const crate = run({ kind: 'start', source: 'startup' }, { kind: 'notify', notificationType: 'idle_prompt' });
     expect(crate.zone).toBe('intake');
