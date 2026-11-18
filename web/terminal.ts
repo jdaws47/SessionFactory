@@ -1,5 +1,6 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
+import type { TermFrame } from '../src/shared/types';
 
 /** A browser terminal attached to one factory tmux session. Disposing it only detaches. */
 export class AttachedTerminal {
@@ -50,7 +51,7 @@ export class AttachedTerminal {
     this.xterm.focus();
   }
 
-  private send(msg: unknown): void {
+  private send(msg: TermFrame): void {
     if (this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
   }
 

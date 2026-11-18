@@ -5,7 +5,8 @@ import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 
 type Params = Record<string, string>;
-export type Handler = (body: any, params: Params, query: URLSearchParams) => unknown | Promise<unknown>;
+/** Route handler. The body is whatever JSON the client sent: untrusted, so handlers check each field they use. */
+export type Handler = (body: Record<string, unknown>, params: Params, query: URLSearchParams) => unknown | Promise<unknown>;
 export type SocketHandler = (ws: WebSocket, params: Params, query: URLSearchParams) => void;
 
 interface Route<H> {
@@ -122,7 +123,8 @@ export class FactoryServer {
           const text = Buffer.concat(chunks).toString('utf8');
           body = text ? JSON.parse(text) : {};
         }
-        const result = await r.handler(body ?? {}, params, url.searchParams);
+        const fields = body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+        const result = await r.handler(fields, params, url.searchParams);
         res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(result ?? { ok: true }));
       } catch (err) {
         const status = err instanceof HttpError ? err.status : 500;

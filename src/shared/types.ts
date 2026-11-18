@@ -74,3 +74,42 @@ export interface HopperTicket extends JiraTicket {
   /** Most recent archived crate for this ticket, offered for Resume. */
   archivedCrateId?: string;
 }
+
+/** What the server pushes to the page over /ws. */
+export type ServerMessage = { type: 'state'; state: FactoryState };
+
+/** What the page sends over /ws/term/:slot: keystrokes ('i'), or the terminal's new size ('r'). */
+export type TermFrame = { t: 'i'; d: string } | { t: 'r'; c: number; r: number };
+
+/** Request bodies the page sends to the API (the server still treats them as untrusted), and the replies. */
+export interface RenameRequest {
+  name: string;
+}
+export interface ArchiveRequest {
+  endSession?: boolean;
+}
+export interface LabelArchiveRequest {
+  label: string;
+}
+export interface NewSessionRequest {
+  label?: string;
+  prompt?: string;
+}
+/** A factory terminal started for a crate (new session, continue, Jira start). */
+export interface StartedReply {
+  crateId: string;
+  slot: string;
+}
+export interface ResumeReply {
+  slot?: string;
+}
+export interface LabelArchiveReply {
+  archived: number;
+}
+export interface ImportReply {
+  added: number;
+  scanned: number;
+}
+export interface HopperReply {
+  tickets: HopperTicket[];
+}

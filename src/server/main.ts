@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type { WebSocket } from 'ws';
-import type { Crate, FactoryState, HopperTicket } from '../shared/types';
+import type { Crate, FactoryState, HopperReply, HopperTicket, ImportReply, LabelArchiveReply, ResumeReply, ServerMessage, StartedReply } from '../shared/types';
 import { CLAUDE_PROJECTS_DIR, CLEAN_ROOT, DIST_DIR, EVENTS_DIR, HOST, PORT, REGISTRY_FILE, REPO_DIR, RUN_DIR } from './config';
 import { FactoryServer, HttpError } from './http';
 import { handoffBlocker } from './handoff';
@@ -45,7 +45,7 @@ function broadcast(): void {
   if (broadcastTimer) return;
   broadcastTimer = setTimeout(() => {
     broadcastTimer = undefined;
-    const msg = JSON.stringify({ type: 'state', state: state() });
+    const msg = JSON.stringify({ type: 'state', state: state() } satisfies ServerMessage);
     for (const ws of clients) ws.send(msg);
   }, 80);
 }
@@ -87,7 +87,7 @@ function noticeEndedTerminals(): void {
 }
 
 /** Starts a fresh factory terminal for a new crate; a name becomes the Claude session's name (--name). */
-async function startNew(opts: { name?: string; prompt?: string }): Promise<{ crateId: string; slot: string }> {
+async function startNew(opts: { name?: string; prompt?: string }): Promise<StartedReply> {
   requireTerminals();
   const slot = newSlot();
   const crate = registry.preregister(slot, { name: opts.name }, Date.now());
@@ -144,14 +144,14 @@ app.route('POST', '/api/crates/:id/dismiss-returned', (_b, { id }) => {
   crateOr404(id);
   registry.dismissReturned(id);
 });
-app.route('POST', '/api/labels/archive', (body) => ({ archived: registry.archiveLabel(String(body.label ?? ''), Date.now()) }));
+app.route('POST', '/api/labels/archive', (body): LabelArchiveReply => ({ archived: registry.archiveLabel(String(body.label ?? ''), Date.now()) }));
 
 app.route('POST', '/api/terminals', (body) =>
   startNew({ name: body.label ? String(body.label).trim() : undefined, prompt: body.prompt ? String(body.prompt) : undefined }),
 );
 
 /** Resume (or move) a crate's conversation into a new factory terminal. Refused while it may still be open elsewhere. */
-app.route('POST', '/api/crates/:id/resume', async (_b, { id }) => {
+app.route('POST', '/api/crates/:id/resume', async (_b, { id }): Promise<ResumeReply> => {
   requireTerminals();
   const crate = crateOr404(id);
   if (await liveTerminal(crate)) return { slot: crate.slot };
@@ -180,7 +180,7 @@ function requireJira(): void {
   if (!jira.configured) throw new HttpError(501, 'Jira is not configured: start the server from a shell that has run scrub-in (JIRA_* variables).');
 }
 
-app.route('GET', '/api/jira/assigned', async (_b, _p, query) => {
+app.route('GET', '/api/jira/assigned', async (_b, _p, query): Promise<HopperReply> => {
   requireJira();
   const tickets = await jira.assigned(query.get('refresh') === '1');
   const crates = registry.all();
@@ -221,7 +221,7 @@ async function pollJira(): Promise<void> {
 }
 
 /** Brings sessions from before the factory existed (or run without hooks) into the Warehouse. Reads ~/.claude only. */
-async function importHistory(): Promise<{ added: number; scanned: number }> {
+async function importHistory(): Promise<ImportReply> {
   const sessions = await scanHistory(CLAUDE_PROJECTS_DIR, CLEAN_ROOT, DEFAULT_JIRA_PROJECTS);
   const added = registry.importPast(sessions, Date.now() - 30 * 60_000);
   return { added, scanned: sessions.length };
@@ -235,7 +235,7 @@ app.socket('/ws', async (ws) => {
   // A page (re)load catches up: any hook event a watcher missed, and terminals closed while nobody was looking.
   ingestor.drain();
   await terminals.refresh();
-  ws.send(JSON.stringify({ type: 'state', state: state() }));
+  ws.send(JSON.stringify({ type: 'state', state: state() } satisfies ServerMessage));
 });
 
 app.socket('/ws/term/:slot', (ws, { slot }, query) => {
@@ -253,9 +253,10 @@ app.socket('/ws/term/:slot', (ws, { slot }, query) => {
   });
   ws.on('message', (raw) => {
     try {
-      const msg = JSON.parse(raw.toString());
+      // A TermFrame, unless something else is talking to the socket: check before use.
+      const msg = JSON.parse(raw.toString()) as Partial<Record<'t' | 'd' | 'c' | 'r', unknown>>;
       if (msg.t === 'i' && typeof msg.d === 'string') term.write(msg.d);
-      else if (msg.t === 'r') term.resize(Math.max(20, Math.min(500, msg.c | 0)), Math.max(5, Math.min(200, msg.r | 0)));
+      else if (msg.t === 'r') term.resize(Math.max(20, Math.min(500, Number(msg.c) | 0)), Math.max(5, Math.min(200, Number(msg.r) | 0)));
     } catch {
       // ignore malformed frames
     }

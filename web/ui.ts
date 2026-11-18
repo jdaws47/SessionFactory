@@ -1,4 +1,15 @@
-import type { CrateView, FactoryState, HopperTicket } from '../src/shared/types';
+import type {
+  ArchiveRequest,
+  CrateView,
+  FactoryState,
+  HopperReply,
+  HopperTicket,
+  ImportReply,
+  LabelArchiveRequest,
+  NewSessionRequest,
+  RenameRequest,
+  StartedReply,
+} from '../src/shared/types';
 import { AlertNotifier } from './alerts';
 import { get, post } from './api';
 import { crateColor } from './paint';
@@ -170,7 +181,7 @@ export class Ui {
         if (what === 'factory') this.showFactory();
         else if (what === 'list') this.openList();
         else if (what === 'import')
-          void post<{ added: number; scanned: number }>('/api/history/import').then(({ added, scanned }) =>
+          void post<ImportReply>('/api/history/import').then(({ added, scanned }) =>
             this.toast(added ? `Imported ${added} past session${added === 1 ? '' : 's'}` : `Nothing new (${scanned} past sessions already here)`),
           );
       });
@@ -326,12 +337,12 @@ export class Ui {
     const rename = this.act(async () => {
       const next = window.prompt('Rename this session (runs /rename in its terminal)', c.title ?? c.label);
       if (!next?.trim()) return;
-      await post(`/api/crates/${c.id}/rename`, { name: next });
+      await post(`/api/crates/${c.id}/rename`, { name: next } satisfies RenameRequest);
       this.toast(`Renamed to ${next.trim()}`);
     });
     const archive = async (endSession: boolean) => {
       if (endSession && !window.confirm(`End the Claude session in "${c.label}" and archive it?`)) return;
-      await post(`/api/crates/${c.id}/archive`, { endSession });
+      await post(`/api/crates/${c.id}/archive`, { endSession } satisfies ArchiveRequest);
       this.toast(`Shipped ${c.label} to the warehouse`);
     };
     const closeMenu = () => {
@@ -353,7 +364,7 @@ export class Ui {
                   label: `Archive all "${c.label}" (${sameLabel})`,
                   kind: 'danger' as const,
                   run: async () => {
-                    await post('/api/labels/archive', { label: c.label });
+                    await post('/api/labels/archive', { label: c.label } satisfies LabelArchiveRequest);
                     this.toast(`Shipped the ${c.label} pallet`);
                   },
                 },
@@ -484,7 +495,7 @@ export class Ui {
 
   async continueLabel(c: CrateView): Promise<void> {
     this.stackPanel.hidden = true;
-    const { crateId } = await post<{ crateId: string }>(`/api/crates/${c.id}/continue`);
+    const { crateId } = await post<StartedReply>(`/api/crates/${c.id}/continue`);
     this.closeWarehouse();
     this.select(crateId);
   }
@@ -506,7 +517,7 @@ export class Ui {
     const start = this.act(async () => {
       const label = (document.getElementById('ns-label') as HTMLInputElement).value.trim();
       const prompt = (document.getElementById('ns-prompt') as HTMLTextAreaElement).value.trim();
-      const { crateId } = await post<{ crateId: string }>('/api/terminals', { label, prompt });
+      const { crateId } = await post<StartedReply>('/api/terminals', { label, prompt } satisfies NewSessionRequest);
       close();
       this.select(crateId);
     });
@@ -533,7 +544,7 @@ export class Ui {
     box.innerHTML = '<div class="dim">Loading tickets…</div>';
     let tickets: HopperTicket[];
     try {
-      ({ tickets } = await get<{ tickets: HopperTicket[] }>(`/api/jira/assigned${refresh ? '?refresh=1' : ''}`));
+      ({ tickets } = await get<HopperReply>(`/api/jira/assigned${refresh ? '?refresh=1' : ''}`));
     } catch (err) {
       box.innerHTML = `<div class="error">Couldn't load tickets: ${esc((err as Error).message)}</div>`;
       return;
@@ -546,7 +557,7 @@ export class Ui {
       label: t.archivedCrateId ? 'Start new' : 'Start',
       kind: t.archivedCrateId ? 'plain' : 'primary',
       run: async () => {
-        const { crateId } = await post<{ crateId: string }>(`/api/jira/${encodeURIComponent(t.key)}/start`);
+        const { crateId } = await post<StartedReply>(`/api/jira/${encodeURIComponent(t.key)}/start`);
         close();
         this.select(crateId);
       },
@@ -662,7 +673,7 @@ export class Ui {
           ${this.button({
             label: 'Import older sessions',
             run: async () => {
-              const { added, scanned } = await post<{ added: number; scanned: number }>('/api/history/import');
+              const { added, scanned } = await post<ImportReply>('/api/history/import');
               this.toast(added ? `Imported ${added} past session${added === 1 ? '' : 's'}` : `Nothing new (${scanned} past sessions already here)`);
             },
           })}

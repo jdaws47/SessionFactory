@@ -1,4 +1,4 @@
-import type { FactoryState } from '../src/shared/types';
+import type { FactoryState, ServerMessage } from '../src/shared/types';
 
 export async function post<T = unknown>(path: string, body: unknown = {}): Promise<T> {
   const res = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -24,7 +24,7 @@ export function subscribe(onState: (s: FactoryState) => void, onConnection: (up:
       onConnection(true);
     };
     ws.onmessage = (m) => {
-      const msg = JSON.parse(m.data as string);
+      const msg = JSON.parse(m.data as string) as ServerMessage;
       if (msg.type === 'state') onState(msg.state);
     };
     ws.onclose = () => {
