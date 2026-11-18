@@ -152,7 +152,8 @@ app.route('POST', '/api/crates/:id/resume', async (_b, { id }) => {
   requireTerminals();
   const crate = crateOr404(id);
   if (await liveTerminal(crate)) return { slot: crate.slot };
-  const blocked = handoffBlocker(crate, isAlive);
+  // liveTerminal() was just checked above, so a crate with a slot here has lost its factory terminal.
+  const blocked = handoffBlocker(crate, isAlive, { factoryTerminalGone: !!crate.slot });
   if (blocked) throw new HttpError(409, blocked);
   const sessionId = crate.sessionIds[crate.sessionIds.length - 1];
   const slot = newSlot();

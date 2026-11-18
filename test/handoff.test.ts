@@ -23,6 +23,11 @@ describe('moving a session into the factory', () => {
     expect(handoffBlocker(crate({ pid: undefined, zone: 'storage' }), () => false)).toBeNull();
   });
 
+  it('allows it when its own factory terminal has closed and no Claude process ever reported (e.g. a resume that failed)', () => {
+    expect(handoffBlocker(crate({ pid: undefined, zone: 'dock', slot: 'sf-1' }), () => false, { factoryTerminalGone: true })).toBeNull();
+    expect(handoffBlocker(crate({ pid: undefined, zone: 'dock' }), () => false, { factoryTerminalGone: false })).toMatch(/Can't confirm/);
+  });
+
   it('has nothing to move before a session exists', () => {
     expect(handoffBlocker(crate({ sessionIds: [] }), () => false)).toMatch(/no Claude session/);
   });
