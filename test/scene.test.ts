@@ -218,7 +218,7 @@ describe('cranes set crates down where they stay', () => {
         for (const [id, s] of internals.sprites) {
           // Once a crate has been set down (not on a belt, not on a crane, train standing), it must not move at all.
           const resting = !s.path.length && !s.next && !held.includes(id) && !scene.train.moving;
-          const at = { ...(s.stage ? { x: s.x, y: s.y } : internals.pileOffset(s)), resting };
+          const at = { ...(s.phase === 'cargo' || s.phase === 'yard' ? { x: s.x, y: s.y } : internals.pileOffset(s)), resting };
           const before = drawn.get(id);
           if (before?.resting && resting) worst = Math.max(worst, Math.hypot(at.x - before.x, at.y - before.y));
           drawn.set(id, at);
@@ -234,7 +234,7 @@ describe('cranes set crates down where they stay', () => {
     }
     scene.setCrates([...full, ...now.map((m, i) => (i > 0 ? { ...m, archived: true, archivedAt: 3000 + i } : m))], 3000);
     watch(90);
-    expect([...internals.sprites.values()].filter((s) => s.stage).length).toBe(2);
+    expect([...internals.sprites.values()].filter((s) => s.phase === 'cargo' || s.phase === 'yard').length).toBe(2);
     expect(worst).toBeLessThan(0.5);
   });
 });
@@ -287,13 +287,13 @@ describe('crates leaving mid-job', () => {
     expect(inside(scene).gantryJobs.has('A')).toBe(true);
     scene.setCrates([b], 3000);
     scene.setCrates([{ ...b, archived: true, archivedAt: 6 }], 3001);
-    step(scene, 300, () => inside(scene).sprites.get('B')!.stage === 'yard');
-    expect(inside(scene).sprites.get('B')!.stage).toBe('yard');
+    step(scene, 300, () => inside(scene).sprites.get('B')!.phase === 'yard');
+    expect(inside(scene).sprites.get('B')!.phase).toBe('yard');
   });
 });
 
 describe('cranes never deadlock', () => {
-  const stageOf = (scene: Scene, id: string) => (scene.inspect()).sprites.get(id)!.stage;
+  const phaseOf = (scene: Scene, id: string) => scene.inspect().sprites.get(id)!.phase;
   const moving = (scene: Scene, id: string) => {
     const s = sprite(scene, id);
     return s.path.length > 0 || !!s.next;
@@ -326,8 +326,8 @@ describe('cranes never deadlock', () => {
       step(scene, delay);
       scene.setCrates([{ ...a, archived: true, archivedAt: 6 }, { ...b, archived: false }], 3000);
       step(scene, 300);
-      expect(stageOf(scene, 'A'), `${zone} ${delay}`).toBe('yard');
-      expect([stageOf(scene, 'B'), moving(scene, 'B')], `${zone} ${delay}`).toEqual([undefined, false]);
+      expect(phaseOf(scene, 'A'), `${zone} ${delay}`).toBe('yard');
+      expect([phaseOf(scene, 'B'), moving(scene, 'B')], `${zone} ${delay}`).toEqual(['floor', false]);
     }
   }, 120_000);
 });
@@ -403,7 +403,7 @@ describe('freight train and warehouse', () => {
     // At the warehouse the gantry unloads from the top: last loaded, first off.
     const stored: string[] = [];
     step(scene, 180, () => {
-      for (const id of [first, last]) if (st(scene, id).stage === 'yard' && !stored.includes(id)) stored.push(id);
+      for (const id of [first, last]) if (st(scene, id).phase === 'yard' && !stored.includes(id)) stored.push(id);
       return stored.length === 2;
     });
     expect(stored).toEqual([last, first]);
@@ -436,8 +436,8 @@ describe('freight train and warehouse', () => {
     a = { ...a, archived: true, archivedAt: 2000, zone: 'storage' };
     scene.setCrates([a], 2000);
 
-    step(scene, 120, () => st(scene, 'A').stage === 'yard');
-    expect(st(scene, 'A').stage).toBe('yard');
+    step(scene, 120, () => st(scene, 'A').phase === 'yard');
+    expect(st(scene, 'A').phase).toBe('yard');
     expect(scene.stackOf('A')).toContain('A');
     expect(st(scene, 'A').x).toBeGreaterThan(1600);
 
@@ -445,10 +445,10 @@ describe('freight train and warehouse', () => {
     scene.setCrates([a], 3000);
     step(scene, 180, () => {
       const s = st(scene, 'A');
-      return !s.stage && !s.path.length && !s.next && s.at.zone === 'storage';
+      return s.phase === 'floor' && !s.path.length && !s.next && s.at.zone === 'storage';
     });
     const back = st(scene, 'A');
-    expect(back.stage).toBeUndefined();
+    expect(back.phase).toBe('floor');
     expect(back.x).toBeLessThan(1600);
     expect(scene.train.atFactory).toBe(true);
   });
@@ -503,7 +503,7 @@ describe('freight train and warehouse', () => {
   it('crates archived before the page loaded are already on the stacks', () => {
     const scene = new Scene();
     scene.setCrates([{ ...crate('old', 'storage', 1), archived: true, archivedAt: 5 }], 1000);
-    expect(st(scene, 'old').stage).toBe('yard');
+    expect(st(scene, 'old').phase).toBe('yard');
     expect(st(scene, 'old').x).toBeGreaterThan(1600);
   });
 });

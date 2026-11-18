@@ -7,6 +7,15 @@ import { STACKS, Stacks, stackSpot, Train, TRAIN, WAREHOUSE_X, WORLD_W } from '.
 import { squircleAt, squirclePath } from './shapes';
 import { C, crateColor, drawBelt, drawCrane, drawOperator, fillSquircle, junction, machineBack, machineFront, minutes, paintScenery, paintWarehouse, RADIUS, sectionKey, wrap } from './paint';
 
+/**
+ * A crate's lifecycle. 'floor': on the factory floor. 'toFreight': archived and on its way to the train (belts, freight
+ * crane). 'cargo': riding the train. 'yard': parked on a warehouse stack. Unloaded at the factory it is 'floor' again.
+ */
+export type Phase = 'floor' | 'toFreight' | 'cargo' | 'yard';
+
+/** Off the factory floor for good: on the train or in the warehouse. */
+const away = (s: Sprite): boolean => s.phase === 'cargo' || s.phase === 'yard';
+
 interface Leg {
   path: Waypoint[];
   to: SlotRef;
@@ -22,11 +31,10 @@ export interface Sprite {
   path: Waypoint[];
   /** At most one trip is queued behind the current one, so rapid state changes never pile up detours. */
   next?: Leg;
-  leaving: boolean;
-  /** Archived crates: riding the train ('cargo') or parked on a warehouse stack ('yard'). */
-  stage?: 'cargo' | 'yard';
-  /** Brought back from the warehouse: rides the train home, then heads for `at`. */
-  returning?: boolean;
+  /** Where the crate is in its life: see Phase. */
+  phase: Phase;
+  /** Brought back while on the train or in the warehouse: rides the train home, then heads for `at`. */
+  homeward?: boolean;
   /** Fixed place in the wagon while riding the train, so crates don't shuffle when another is unloaded. */
   wagonSlot?: number;
   pileRank: number;
@@ -107,9 +115,9 @@ export class Scene {
       if (c.archived) continue;
       let area = floorArea(c.zone, c.turns);
       const existing = this.sprites.get(c.id);
-      if (area === 'intake' && existing && !existing.leaving && existing.at.zone !== 'intake') area = 'dock';
+      if (area === 'intake' && existing && existing.phase === 'floor' && existing.at.zone !== 'intake') area = 'dock';
       // Already riding the dock belt in: it keeps its place until it has settled, then leaves (see update()).
-      const ridingIn = existing && !existing.leaving && existing.at.zone === 'dock' && existing.path[0]?.track === dockBelt;
+      const ridingIn = existing && existing.phase === 'floor' && existing.at.zone === 'dock' && existing.path[0]?.track === dockBelt;
       if (area !== 'dock' && ridingIn) {
         this.pendingLeave.add(c.id);
         area = 'dock';
@@ -129,7 +137,7 @@ export class Scene {
     const onDock = (id: string) => {
       const s = this.sprites.get(id);
       if (!s) return first;
-      return !s.leaving && s.at.zone === 'dock' && (s.path[0]?.track === dockBelt || s.path[0]?.track === NET.dock.recycle?.track || (!s.path.length && !s.next));
+      return s.phase === 'floor' && s.at.zone === 'dock' && (s.path[0]?.track === dockBelt || s.path[0]?.track === NET.dock.recycle?.track || (!s.path.length && !s.next));
     };
     // On the very first layout every docked crate is already in place; after that, crates join the queue only
     // as they roll onto the dock belt (update()), and crates going round the recycle loop are out of it.
@@ -173,13 +181,13 @@ export class Scene {
         this.gantryJobs.delete(id);
         this.train.cargo = this.train.cargo.filter((cid) => cid !== id);
         for (const crane of [...Object.values(this.cranes), this.gantry]) crane.cancel(id);
-      } else if (c.archived && !s.leaving && !s.stage) {
+      } else if (c.archived && s.phase === 'floor') {
         this.go(s, { zone: 'freight', slot: 0 });
-        s.leaving = true;
+        s.phase = 'toFreight';
         s.pileRank = 0;
         s.pileSize = 1;
-      } else if (c.archived && s.returning) {
-        s.returning = false;
+      } else if (c.archived && s.homeward) {
+        s.homeward = false;
       }
     }
     // Archived crates the floor has never seen (first load, history import) are already in the warehouse.
@@ -187,7 +195,7 @@ export class Scene {
       if (!c.archived || this.sprites.has(c.id)) continue;
       const spot = this.stacks.place(c.id);
       const pos = stackSpot(spot.index, spot.level);
-      this.sprites.set(c.id, { ...pos, at: { zone: 'freight', slot: 0 }, currentTo: { zone: 'freight', slot: 0 }, path: [], leaving: true, stage: 'yard', pileRank: 0, pileSize: 1 });
+      this.sprites.set(c.id, { ...pos, at: { zone: 'freight', slot: 0 }, currentTo: { zone: 'freight', slot: 0 }, path: [], phase: 'yard', pileRank: 0, pileSize: 1 });
     }
   }
 
@@ -256,13 +264,13 @@ export class Scene {
     for (const c of [...list].sort((a, b) => a.zoneSince - b.zoneSince)) {
       const s = this.sprites.get(c.id);
       // The bottom of each pile (or a crate alone in its spot) keeps it; crates piled on top are what move.
-      if (s && !s.leaving && s.at.zone === zone && !used.has(s.at.slot) && s.pileRank === s.pileSize - 1) {
+      if (s && s.phase === 'floor' && s.at.zone === zone && !used.has(s.at.slot) && s.pileRank === s.pileSize - 1) {
         used.add(s.at.slot);
         out.set(c.id, s.at.slot);
       } else rest.push(c);
     }
     // Last in, first out: crates already piled here take free spots newest (top) first; arrivals follow in order.
-    const piled = (c: CrateView) => this.sprites.get(c.id)?.at.zone === zone && !this.sprites.get(c.id)!.leaving;
+    const piled = (c: CrateView) => this.sprites.get(c.id)?.at.zone === zone && this.sprites.get(c.id)!.phase === 'floor';
     for (const c of [...rest.filter(piled).reverse(), ...rest.filter((c) => !piled(c))]) {
       let slot = 0;
       while (slot < cap && used.has(slot)) slot++;
@@ -278,26 +286,26 @@ export class Scene {
     if (!s) {
       const pos = NET[to.zone].slots[to.slot].pos;
       if (instant) {
-        s = { ...pos, at: to, currentTo: to, path: [], leaving: false, pileRank, pileSize };
+        s = { ...pos, at: to, currentTo: to, path: [], phase: 'floor', pileRank, pileSize };
       } else if (c.reactivationCount > 0) {
-        s = { x: FREIGHT.wagon.x, y: FREIGHT.wagon.y, at: to, currentTo: to, path: travel({ zone: 'freight', slot: 0 }, to), leaving: false, pileRank, pileSize };
+        s = { x: FREIGHT.wagon.x, y: FREIGHT.wagon.y, at: to, currentTo: to, path: travel({ zone: 'freight', slot: 0 }, to), phase: 'floor', pileRank, pileSize };
       } else {
-        s = { x: HOPPER_DROP.x, y: HOPPER.y + HOPPER.h - CRATE_H / 2, at: to, currentTo: to, path: fromHopper(to), leaving: false, pileRank, pileSize };
+        s = { x: HOPPER_DROP.x, y: HOPPER.y + HOPPER.h - CRATE_H / 2, at: to, currentTo: to, path: fromHopper(to), phase: 'floor', pileRank, pileSize };
       }
       this.sprites.set(c.id, s);
       return;
     }
-    if (s.stage) {
+    if (away(s)) {
       // In the warehouse or on the train: it comes home by train first (see updateWarehouse()).
       s.at = to;
-      s.returning = true;
+      s.homeward = true;
       s.pileRank = pileRank;
       s.pileSize = pileSize;
       return;
     }
-    if (s.leaving) {
+    if (s.phase === 'toFreight') {
       // Still on its way to freight: just turn it round (and give up any place it had in the wagon).
-      s.leaving = false;
+      s.phase = 'floor';
       s.wagonSlot = undefined;
     }
     s.pileRank = pileRank;
@@ -317,7 +325,7 @@ export class Scene {
     }
     const spot = NET[s.at.zone].slots[s.at.slot];
     if (s.path.length !== 1 || spot.pos.x !== p.x || spot.pos.y !== p.y) return p;
-    const below = [...this.sprites.entries()].filter(([oid, o]) => oid !== id && !o.stage && !o.leaving && !o.path.length && !o.next && o.at.zone === s.at.zone && o.at.slot === s.at.slot).length;
+    const below = [...this.sprites.entries()].filter(([oid, o]) => oid !== id && o.phase === 'floor' && !o.path.length && !o.next && o.at.zone === s.at.zone && o.at.slot === s.at.slot).length;
     const k = Math.min(below, 3);
     s.dropLift = k;
     return { x: p.x - k * 6, y: p.y - k * 6 };
@@ -340,7 +348,7 @@ export class Scene {
 
   /** Re-stacks the pile at a spot after a crate comes to rest in it, so the newest arrival is on top. */
   private restack(at: SlotRef): void {
-    const pile = [...this.sprites.values()].filter((s) => !s.leaving && !s.stage && s.at.zone === at.zone && s.at.slot === at.slot);
+    const pile = [...this.sprites.values()].filter((s) => s.phase === 'floor' && s.at.zone === at.zone && s.at.slot === at.slot);
     pile.sort((a, b) => (b.settled ?? Infinity) - (a.settled ?? Infinity));
     pile.forEach((s, rank) => Object.assign(s, { pileRank: rank, pileSize: pile.length }));
   }
@@ -395,7 +403,7 @@ export class Scene {
     if (hop && into.kind === 'crane' && hop.x === into.pos.x && hop.y === into.pos.y && joins(s, s.path.slice(0, craneAt), onward) && this.craneFor(s.currentTo.zone).cancel(this.idOf(s))) {
       s.path = [...s.path.slice(0, craneAt), ...onward];
       s.dropLift = undefined;
-      if (!s.stage) s.wagonSlot = undefined;
+      if (!away(s)) s.wagonSlot = undefined;
       s.next = undefined;
       s.currentTo = to;
       s.at = to;
@@ -446,7 +454,7 @@ export class Scene {
     const moving = (s: Sprite) => s.path.length > 0 || !!s.next;
     const rect = (x: number, y: number) => ({ x: x - CRATE_W / 2 + 3, y: y - CRATE_H / 2 + 3, w: CRATE_W - 6, h: CRATE_H - 6 });
     const hits = (a: ReturnType<typeof rect>, b: ReturnType<typeof rect>) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-    const solid = [...this.sprites.entries()].filter(([id, s]) => !held.has(id) && !s.stage);
+    const solid = [...this.sprites.entries()].filter(([id, s]) => !held.has(id) && !away(s));
     // Spots a crane is going to set a crate down on count as occupied for everyone else.
     const reserved = Object.values(this.cranes).flatMap((c) => c.reserved);
     const blockers = new Map<string, Set<string>>();
@@ -558,11 +566,11 @@ export class Scene {
       if (!resting) s.settled = undefined;
       else if (s.settled === undefined) {
         s.settled = ++this.arrivals;
-        if (!s.leaving && !s.stage) this.restack(s.at);
+        if (s.phase === 'floor') this.restack(s.at);
       }
-      if (s.leaving && !s.stage && !s.path.length && !s.next && !this.heldBy(id) && this.train.atFactory) {
+      if (s.phase === 'toFreight' && !s.path.length && !s.next && !this.heldBy(id) && this.train.atFactory) {
         // Lowered into the wagon: it is cargo now (and no longer part of any factory pile).
-        s.stage = 'cargo';
+        s.phase = 'cargo';
         s.pileRank = 0;
         s.pileSize = 1;
         this.train.cargo.push(id);
@@ -578,7 +586,7 @@ export class Scene {
       done: (id: string) => {
         const s = this.sprites.get(id);
         // Lifted out of the wagon: its place there is free again.
-        if (s && !s.leaving && !s.stage && s.wagonSlot !== undefined) s.wagonSlot = undefined;
+        if (s && s.phase === 'floor' && s.wagonSlot !== undefined) s.wagonSlot = undefined;
         if (s?.dropLift !== undefined && s.path[0]) {
           // Set down on top of a pile: it rests at the pile's spot, drawn at the height it was lowered to.
           Object.assign(s, { x: s.path[0].x, y: s.path[0].y, lift: s.dropLift, dropLift: undefined });
@@ -591,11 +599,11 @@ export class Scene {
         // A crate lowered onto a pile aims at the pile's top; what has to be clear is the pile's own spot.
         const at = me?.dropLift !== undefined && me.path[0] ? me.path[0] : to;
         return ![...this.sprites.entries()].some(([oid, o]) => {
-          if (oid === except || this.heldBy(oid) || o.stage) return false;
+          if (oid === except || this.heldBy(oid) || away(o)) return false;
           // A crate on its way along a belt is held back from a reserved spot; only one sitting there is in the way.
           if ((o.path.length || o.next) && !o.path[0]?.crane) return false;
           // Crates already stacked in the same pile spot (or the wagon) don't stop the crane adding another.
-          const intoWagon = me?.wagonSlot !== undefined && me.leaving;
+          const intoWagon = me?.wagonSlot !== undefined && me.phase === 'toFreight';
           const pileMate = (mine && !o.path.length && !o.next && o.at.zone === mine.zone && o.at.slot === mine.slot) || (intoWagon && o.wagonSlot !== undefined);
           return !pileMate && Math.abs(o.x - at.x) < CRATE_W - 6 && Math.abs(o.y - at.y) < CRATE_H - 6;
         });
@@ -613,7 +621,7 @@ export class Scene {
       const lap = this.recycling.get(id);
       if (lap === 'out' && belt === NET.dock.recycle?.track) this.recycling.set(id, 'round');
       const settledHere = !s.path.length && !s.next;
-      if (lap === 'out' || s.leaving || s.at.zone !== 'dock' || !(belt === NET.dock.track || settledHere) || this.dockQueue.includes(id)) continue;
+      if (lap === 'out' || s.phase !== 'floor' || s.at.zone !== 'dock' || !(belt === NET.dock.track || settledHere) || this.dockQueue.includes(id)) continue;
       this.recycling.delete(id);
       this.dockQueue.push(id);
       joined = true;
@@ -660,34 +668,34 @@ export class Scene {
       if (!this.heldBy(id)) Object.assign(s, train.wagonSpot(s.wagonSlot));
     }
     for (const [id, s] of this.sprites) {
-      if (s.stage !== 'yard' || this.heldBy(id)) continue;
+      if (s.phase !== 'yard' || this.heldBy(id)) continue;
       const spot = this.stacks.spotOf(id);
       if (spot) Object.assign(s, spot);
     }
 
-    const onTheWay = [...this.sprites.values()].some((s) => s.leaving && !s.stage);
+    const onTheWay = [...this.sprites.values()].some((s) => s.phase === 'toFreight');
     if (train.atFactory) {
       // Unload from the top of the wagon's pile, one crate at a time: the next comes off once the last one has been
       // lifted out (its crane hop is done).
-      const lifting = [...this.sprites.values()].some((s) => !s.stage && s.path[0]?.crane === 'freight' && Math.hypot(s.x - FREIGHT.wagon.x, s.y - FREIGHT.wagon.y) < 30);
-      const top = [...train.cargo].reverse().find((cid) => this.sprites.get(cid)?.returning);
+      const lifting = [...this.sprites.values()].some((s) => !away(s) && s.path[0]?.crane === 'freight' && Math.hypot(s.x - FREIGHT.wagon.x, s.y - FREIGHT.wagon.y) < 30);
+      const top = [...train.cargo].reverse().find((cid) => this.sprites.get(cid)?.homeward);
       // It comes out over the transfer point, so a crate waiting there to go into the wagon goes in first.
-      const transferBusy = [...this.sprites.values()].some((s) => !s.stage && Math.hypot(s.x - FREIGHT.transfer.x, s.y - FREIGHT.transfer.y) < CRATE_H);
+      const transferBusy = [...this.sprites.values()].some((s) => !away(s) && Math.hypot(s.x - FREIGHT.transfer.x, s.y - FREIGHT.transfer.y) < CRATE_H);
       for (const id of lifting || transferBusy || !top ? [] : [top]) {
         // Home: the freight crane lifts it out of the wagon onto the belt, and it heads for its spot.
         const s = this.sprites.get(id)!;
         // It keeps its wagon place until the crane has lifted it out, so nothing is set down on it meanwhile.
-        Object.assign(s, { stage: undefined, returning: false, leaving: false });
+        Object.assign(s, { phase: 'floor', homeward: false });
         // The freight crane lifts it from where it sits in the wagon.
         s.path = [{ x: s.x, y: s.y }, ...travel({ zone: 'freight', slot: 0 }, s.at).slice(1)];
         s.next = undefined;
         s.currentTo = s.at;
         train.cargo = train.cargo.filter((cid) => cid !== id);
       }
-      const wagonBusy = [...this.sprites.entries()].some(([id, s]) => !s.stage && (this.heldBy(id) === this.cranes.freight || Math.hypot(s.x - FREIGHT.wagon.x, s.y - FREIGHT.wagon.y) < 12));
-      const fetchWaiting = [...this.sprites.values()].some((s) => s.stage === 'yard' && s.returning);
+      const wagonBusy = [...this.sprites.entries()].some(([id, s]) => !away(s) && (this.heldBy(id) === this.cranes.freight || Math.hypot(s.x - FREIGHT.wagon.x, s.y - FREIGHT.wagon.y) < 12));
+      const fetchWaiting = [...this.sprites.values()].some((s) => s.phase === 'yard' && s.homeward);
       const work = train.cargo.length > 0 || fetchWaiting;
-      const stillUnloading = train.cargo.some((cid) => this.sprites.get(cid)?.returning);
+      const stillUnloading = train.cargo.some((cid) => this.sprites.get(cid)?.homeward);
       if (!onTheWay && !wagonBusy && !stillUnloading && ((work && train.idle > TRAIN_DWELL) || (!work && this.onWarehouse))) train.goTo('warehouse');
     }
 
@@ -695,13 +703,13 @@ export class Scene {
       // Unload from the top of the wagon's pile: last loaded, first off.
       for (const id of [...train.cargo].reverse()) {
         const s = this.sprites.get(id)!;
-        if (s.returning || this.gantryJobs.has(id)) continue;
+        if (s.homeward || this.gantryJobs.has(id)) continue;
         this.stacks.place(id);
         this.gantryJobs.set(id, 'store');
         this.gantry.request(id, this.stacks.spotOf(id)!);
       }
       for (const [id, s] of this.sprites) {
-        if (s.stage !== 'yard' || !s.returning || this.gantryJobs.has(id)) continue;
+        if (s.phase !== 'yard' || !s.homeward || this.gantryJobs.has(id)) continue;
         this.gantryJobs.set(id, 'fetch');
         if (s.wagonSlot === undefined) s.wagonSlot = this.nextWagonSlot(id);
         this.gantry.request(id, train.wagonSpot(s.wagonSlot));
@@ -709,7 +717,7 @@ export class Scene {
       if (!this.gantry.busy && !this.gantryJobs.size) {
         // Crates coming home, or archived crates waiting at the freight station, call it back; otherwise an idle
         // train simply follows you to whichever page you're looking at.
-        const bringingBack = train.cargo.some((id) => this.sprites.get(id)?.returning);
+        const bringingBack = train.cargo.some((id) => this.sprites.get(id)?.homeward);
         const needed = bringingBack || onTheWay;
         if ((needed && train.idle > TRAIN_DWELL) || (!train.cargo.length && !this.onWarehouse)) {
           train.goTo('factory');
@@ -736,13 +744,13 @@ export class Scene {
         const s = this.sprites.get(id);
         if (!s) return;
         if (job === 'store') {
-          s.stage = 'yard';
+          s.phase = 'yard';
           s.wagonSlot = undefined;
           train.cargo = train.cargo.filter((cid) => cid !== id);
           // Brought back while it was being stacked: it waits for the next fetch.
         } else if (job === 'fetch') {
           this.stacks.remove(id);
-          s.stage = 'cargo';
+          s.phase = 'cargo';
           train.cargo.push(id);
         }
         train.idle = 0;
@@ -753,7 +761,7 @@ export class Scene {
 
   hit(p: Point): string | null {
     for (const [id, s] of this.drawOrder().reverse()) {
-      if ((s.leaving && s.stage !== 'yard') || s.stage === 'cargo') continue;
+      if (s.phase === 'toFreight' || s.phase === 'cargo') continue;
       const { x, y } = this.pileOffset(s);
       if (Math.abs(p.x - x) <= CRATE_W / 2 + 3 && Math.abs(p.y - y) <= CRATE_H / 2 + 3) return id;
     }
@@ -763,12 +771,12 @@ export class Scene {
   private drawOrder(): [string, Sprite][] {
     // Warehouse stacks draw bottom crate first, so higher crates sit on top of lower ones.
     const key = ([id, s]: [string, Sprite]) => {
-      const w = s.stage === 'yard' && !this.heldBy(id) ? this.stacks.where(id) : undefined;
+      const w = s.phase === 'yard' && !this.heldBy(id) ? this.stacks.where(id) : undefined;
       if (w) return stackSpot(w.index, 0).y + w.level * 0.01;
       // Crates in the wagon pile up too: the floor of the wagon, then loading order (last loaded in front).
-      if (s.stage === 'cargo' && !this.heldBy(id)) return TRAIN.wagonY + (s.wagonSlot ?? 0) * 0.01;
+      if (s.phase === 'cargo' && !this.heldBy(id)) return TRAIN.wagonY + (s.wagonSlot ?? 0) * 0.01;
       // Crates resting in a factory pile share its spot's depth, so the pile's own order (last placed in front) decides.
-      const resting = !s.stage && !s.leaving && !s.path.length && !s.next && !this.heldBy(id);
+      const resting = s.phase === 'floor' && !s.path.length && !s.next && !this.heldBy(id);
       return resting ? NET[s.at.zone].slots[s.at.slot].pos.y : s.y;
     };
     // Crates on a crane are in the air: they always draw above the crates they pass over.
@@ -781,7 +789,7 @@ export class Scene {
     const moving = s.path.length > 0 || !!s.next;
     // Only crates parked in a factory pile spot stack up; archived crates (train, warehouse) never do.
     // Rank 0 is the crate placed last, on top: the pile rises from the first one placed (shown up to 4 high).
-    return moving || s.stage ? 0 : Math.max(0, Math.min(s.pileSize - 1, 3) - s.pileRank);
+    return moving || away(s) ? 0 : Math.max(0, Math.min(s.pileSize - 1, 3) - s.pileRank);
   }
 
   private pileOffset(s: Sprite): Point {
@@ -819,7 +827,7 @@ export class Scene {
       if (!c) continue;
       this.drawCrate(ctx, c, s, id === opts.hover, id === opts.selected);
       // Warehouse search: crates that don't match fade back.
-      if (q && s.stage === 'yard' && ![c.label, c.jiraKey].some((f) => f?.toLowerCase().includes(q))) {
+      if (q && s.phase === 'yard' && ![c.label, c.jiraKey].some((f) => f?.toLowerCase().includes(q))) {
         fillSquircle(ctx, s.x - CRATE_W / 2 - 1, s.y - CRATE_H / 2 - 1, CRATE_W + 2, CRATE_H + 2, RADIUS.crate, 'rgba(18,16,14,0.78)');
       }
     }
@@ -866,7 +874,7 @@ export class Scene {
 
   private machineStates(): { pos: Point; index: number; crate?: CrateView }[] {
     return NET.working.slots.map((slot, index) => {
-      const entry = [...this.sprites.entries()].find(([, s]) => !s.leaving && s.at.zone === 'working' && s.at.slot === index && s.pileRank === 0 && !s.path.length && !s.next);
+      const entry = [...this.sprites.entries()].find(([, s]) => s.phase === 'floor' && s.at.zone === 'working' && s.at.slot === index && s.pileRank === 0 && !s.path.length && !s.next);
       return { pos: slot.pos, index, crate: entry ? this.crates.get(entry[0]) : undefined };
     });
   }
@@ -967,7 +975,7 @@ export class Scene {
     const cx = x + CRATE_W / 2;
     // Ended sessions look dimmed wherever their crate is: parked, on a belt, on a crane or on the train.
     const parked = c.zone === 'storage';
-    const buried = !moving && !s.stage && s.pileRank > 0;
+    const buried = !moving && !away(s) && s.pileRank > 0;
 
     const holder = this.heldBy(c.id);
     const lifted = holder ? holder.lift : 0;
@@ -1042,7 +1050,7 @@ export class Scene {
     for (const [id, s] of this.drawOrder()) {
       const c = this.crates.get(id);
       const parked = !s.path.length && !s.next && !this.heldBy(id);
-      if (!c || s.leaving || (parked && s.pileRank > 0)) continue;
+      if (!c || s.phase !== 'floor' || (parked && s.pileRank > 0)) continue;
       const top = this.pileOffset(s);
       const x = Math.round(top.x - CRATE_W / 2);
       const y = Math.round(top.y - CRATE_H / 2);
