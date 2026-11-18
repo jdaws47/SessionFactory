@@ -80,6 +80,7 @@ export class Scene {
   private smoke = new Smoke();
   private lastDraw = 0;
 
+  /** A new state snapshot from the server: remember it and lay the floor out for it. */
   setCrates(crates: CrateView[], now: number): void {
     const first = this.crates.size === 0 && this.sprites.size === 0;
     this.serverNow = now;
@@ -87,6 +88,15 @@ export class Scene {
     this.crates = new Map(crates.map((c) => [c.id, c]));
     this.lastCrates = crates;
     this.archivedCount = crates.filter((c) => c.archived).length;
+    this.relayout(first);
+  }
+
+  /**
+   * Assigns every crate its spot for the current snapshot: zones, dock queue order, piles, archive trips. Runs when
+   * a snapshot arrives, and again at the end of a frame in which the dock queue changed physically (see update()).
+   */
+  private relayout(first = false): void {
+    const crates = this.lastCrates;
     const dockBelt = NET.dock.track;
 
     const byZone = new Map<Area, CrateView[]>();
@@ -612,7 +622,7 @@ export class Scene {
       const s = this.sprites.get(id);
       return !s || (!s.path.length && !s.next);
     });
-    if (settled) this.setCrates(this.lastCrates, this.now());
+    if (settled) this.relayout();
   }
 
   private idOf(sprite: Sprite): string {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { LOOP, NET } from '../web/belts';
 import { Scene, type Sprite } from '../web/scene';
 import { WAREHOUSE_X } from '../web/warehouse';
@@ -251,14 +251,9 @@ describe('layout bookkeeping', () => {
     scene.setCrates([a, { ...x, zone: 'working', zoneSince: 4 }], 3000);
     scene.setCrates([a, { ...x, zone: 'working', zoneSince: 4, archived: true, archivedAt: 5 }], 4000);
     step(scene, 120);
-    let layouts = 0;
-    const original = scene.setCrates.bind(scene);
-    scene.setCrates = (...args) => {
-      layouts++;
-      return original(...args);
-    };
+    const relayout = vi.spyOn(scene as never as { relayout(): void }, 'relayout');
     step(scene, 2);
-    expect(layouts).toBe(0);
+    expect(relayout).not.toHaveBeenCalled();
   });
 });
 
