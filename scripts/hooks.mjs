@@ -13,7 +13,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const settings = path.resolve(repo, '..', '.claude', 'settings.local.json');
 const backup = path.join(repo, 'data', 'settings.local.json.orig');
 const command = path.join(repo, 'hooks', 'emit-event');
-const EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Notification', 'Stop', 'SessionEnd'];
+const EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PermissionRequest', 'PostToolUse', 'PostToolUseFailure', 'Notification', 'Stop', 'SessionEnd'];
 
 export function hooksBlock() {
   return Object.fromEntries(EVENTS.map((e) => [e, [{ hooks: [{ type: 'command', command, timeout: 5 }] }]]));

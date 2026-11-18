@@ -30,6 +30,13 @@ describe('normalize', () => {
     expect(event?.waitingOn).toBe('shell: npm test +1');
   });
 
+  it('a permission request jams at once, and a failed tool counts as the tool being done', () => {
+    const asked = normalize({ sf: {}, payload: { session_id: 'a', cwd: '/x', hook_event_name: 'PermissionRequest', tool_name: 'Bash' } });
+    expect(asked).toMatchObject({ kind: 'notify', notificationType: 'permission_prompt' });
+    const failed = normalize({ sf: {}, payload: { session_id: 'a', cwd: '/x', hook_event_name: 'PostToolUseFailure', tool_name: 'Bash' } });
+    expect(failed).toMatchObject({ kind: 'postTool', tool: 'Bash' });
+  });
+
   it('rejects payloads without a session id or cwd', () => {
     expect(normalize({ sf: {}, payload: { hook_event_name: 'Stop' } })).toBeNull();
     expect(normalize(null)).toBeNull();

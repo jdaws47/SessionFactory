@@ -51,7 +51,11 @@ export function normalize(raw: unknown): FactoryEvent | null {
       return { ...base, kind: 'prompt', prompt: str(payload.prompt), title: str(payload.session_title) };
     case 'PreToolUse':
       return { ...base, kind: 'preTool', tool: str(payload.tool_name) };
+    case 'PermissionRequest':
+      // Fires the moment the prompt appears (the permission_prompt notification only comes ~6 s later).
+      return { ...base, kind: 'notify', notificationType: 'permission_prompt' };
     case 'PostToolUse':
+    case 'PostToolUseFailure':
       return { ...base, kind: 'postTool', tool: str(payload.tool_name) };
     case 'Notification':
       return { ...base, kind: 'notify', notificationType: str(payload.notification_type), message: str(payload.message) };
