@@ -50,8 +50,6 @@ interface Sprite {
   /** At most one trip is queued behind the current one, so rapid state changes never pile up detours. */
   next?: Leg;
   leaving: boolean;
-  /** Seconds into being lowered into the freight wagon (archived crates only). */
-  loading?: number;
   /** Archived crates: riding the train ('cargo') or parked on a warehouse stack ('yard'). */
   stage?: 'cargo' | 'yard';
   /** Brought back from the warehouse: rides the train home, then heads for `at`. */
@@ -70,11 +68,9 @@ interface Sprite {
   waited?: number;
 }
 
-const LOAD_SECONDS = 0.8;
 /** Seconds the train waits after its last crate is loaded (or unloaded) before setting off. */
 const TRAIN_DWELL = 1;
 const PATIENCE = 2.5;
-const LOAD_DROP = 6;
 
 /** Stable colour per crate (sessions roam across repos, so the directory is no use for this). */
 export function crateColor(id: string, light = 52): string {
@@ -366,7 +362,6 @@ export class Scene {
     if (s.leaving) {
       // Still on its way to freight: just turn it round (and give up any place it had in the wagon).
       s.leaving = false;
-      s.loading = undefined;
       s.wagonSlot = undefined;
     }
     s.pileRank = pileRank;
@@ -515,7 +510,7 @@ export class Scene {
     const moving = (s: Sprite) => s.path.length > 0 || !!s.next;
     const rect = (x: number, y: number) => ({ x: x - CRATE_W / 2 + 3, y: y - CRATE_H / 2 + 3, w: CRATE_W - 6, h: CRATE_H - 6 });
     const hits = (a: ReturnType<typeof rect>, b: ReturnType<typeof rect>) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-    const solid = [...this.sprites.entries()].filter(([id, s]) => !held.has(id) && s.loading === undefined && !s.stage);
+    const solid = [...this.sprites.entries()].filter(([id, s]) => !held.has(id) && !s.stage);
     // Spots a crane is going to set a crate down on count as occupied for everyone else.
     const reserved = Object.values(this.cranes).flatMap((c) => c.reserved);
     const blockers = new Map<string, Set<string>>();
@@ -660,7 +655,7 @@ export class Scene {
         // A crate lowered onto a pile aims at the pile's top; what has to be clear is the pile's own spot.
         const at = me?.dropLift !== undefined && me.path[0] ? me.path[0] : to;
         return ![...this.sprites.entries()].some(([oid, o]) => {
-          if (oid === except || this.heldBy(oid) || o.loading !== undefined || o.stage) return false;
+          if (oid === except || this.heldBy(oid) || o.stage) return false;
           // A crate on its way along a belt is held back from a reserved spot; only one sitting there is in the way.
           if ((o.path.length || o.next) && !o.path[0]?.crane) return false;
           // Crates already stacked in the same pile spot (or the wagon) don't stop the crane adding another.
@@ -1033,14 +1028,6 @@ export class Scene {
     const off = this.pileOffset(s);
     const x = Math.round(off.x - CRATE_W / 2);
     const y = Math.round(off.y - CRATE_H / 2);
-    if (s.loading !== undefined) {
-      const load = Math.min(1, s.loading / LOAD_SECONDS);
-      ctx.save();
-      ctx.globalAlpha = 1 - load;
-      fillSquircle(ctx, x + load * 10, y + load * LOAD_DROP, CRATE_W - load * 20, CRATE_H - load * 14, RADIUS.crate, crateColor(c.id, 45));
-      ctx.restore();
-      return;
-    }
     const cx = x + CRATE_W / 2;
     // Ended sessions look dimmed wherever their crate is: parked, on a belt, on a crane or on the train.
     const parked = c.zone === 'storage';
@@ -1119,7 +1106,7 @@ export class Scene {
     for (const [id, s] of this.drawOrder()) {
       const c = this.crates.get(id);
       const parked = !s.path.length && !s.next && !this.heldBy(id);
-      if (!c || s.leaving || s.loading !== undefined || (parked && s.pileRank > 0)) continue;
+      if (!c || s.leaving || (parked && s.pileRank > 0)) continue;
       const top = this.pileOffset(s);
       const x = Math.round(top.x - CRATE_W / 2);
       const y = Math.round(top.y - CRATE_H / 2);
