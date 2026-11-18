@@ -27,8 +27,8 @@ export class Registry {
     private readonly cleanRoot: string,
     private readonly jiraProjects: string[] = DEFAULT_JIRA_PROJECTS,
   ) {
-    if (fs.existsSync(file)) {
-      const saved = JSON.parse(fs.readFileSync(file, 'utf8')) as { crates: Crate[]; turnLog?: number[] };
+    const saved = this.load();
+    if (saved) {
       for (const c of saved.crates) {
         if (isSyntheticPrompt(c.firstPrompt)) c.firstPrompt = undefined;
         // Links are by session name only; re-derive so older prompt-based links drop away.
@@ -37,6 +37,29 @@ export class Registry {
       }
       this.turnLog = saved.turnLog ?? [];
     }
+  }
+
+  /**
+   * The saved registry, or the copy from the save before it if the file is unreadable. If neither can be read, the
+   * broken file is kept aside (registry.json.corrupt-<time>) and the factory starts empty rather than not at all.
+   */
+  private load(): { crates: Crate[]; turnLog?: number[] } | undefined {
+    if (!fs.existsSync(this.file)) return undefined;
+    for (const f of [this.file, `${this.file}.bak`]) {
+      try {
+        const saved = JSON.parse(fs.readFileSync(f, 'utf8'));
+        if (Array.isArray(saved?.crates)) {
+          if (f !== this.file) console.warn(`registry: ${this.file} was unreadable; loaded the previous copy`);
+          return saved;
+        }
+      } catch {
+        // try the next copy
+      }
+    }
+    const aside = `${this.file}.corrupt-${Date.now()}`;
+    fs.renameSync(this.file, aside);
+    console.warn(`registry: ${this.file} was unreadable and had no good previous copy; kept it as ${aside}`);
+    return undefined;
   }
 
   onChange(listener: () => void): void {
@@ -59,6 +82,8 @@ export class Registry {
   ingest(ev: FactoryEvent): boolean {
     if (!isWithin(ev.cwd, this.cleanRoot)) return false;
     const crate = this.link(ev) ?? { ...newCrate(ev, this.cleanRoot, randomUUID()), slot: ev.slot };
+    // An old session's end that arrives after its successor started (/clear) is stale: the crate has moved on.
+    if (ev.kind === 'end' && crate.sessionIds.length && crate.sessionIds[crate.sessionIds.length - 1] !== ev.sessionId) return true;
     if (ev.kind === 'stop' && !ev.waitingOn) {
       this.turnLog.push(ev.at);
       this.turnLog = this.turnLog.filter((t) => ev.at - t < 7 * 24 * 3600 * 1000);
@@ -285,6 +310,8 @@ export class Registry {
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     const tmp = `${this.file}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify({ version: 1, crates: this.all(), turnLog: this.turnLog }, null, 1));
+    // Keep the previous save as a fallback (see load()).
+    if (fs.existsSync(this.file)) fs.copyFileSync(this.file, `${this.file}.bak`);
     fs.renameSync(tmp, this.file);
   }
 }

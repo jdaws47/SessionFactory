@@ -18,6 +18,27 @@ beforeEach(() => {
 
 afterEach(() => reg.close());
 
+describe('the registry file', () => {
+  it('a corrupt file falls back to the previous good copy instead of stopping the server', () => {
+    reg.ingest(ev({ kind: 'start', sessionId: 'a' }));
+    reg.close();
+    reg = new Registry(FILE, CLEAN_ROOT);
+    reg.ingest(ev({ kind: 'start', sessionId: 'b' }));
+    reg.close();
+    fs.writeFileSync(FILE, '{"crates": [');
+    reg = new Registry(FILE, CLEAN_ROOT);
+    expect(reg.all().flatMap((c) => c.sessionIds)).toEqual(['a']);
+  });
+
+  it('with no good copy at all it starts empty and keeps the broken file aside', () => {
+    reg.close();
+    fs.writeFileSync(FILE, 'not json');
+    reg = new Registry(FILE, CLEAN_ROOT);
+    expect(reg.all()).toEqual([]);
+    expect(fs.readdirSync(TMP).some((f) => f.startsWith('registry.json.corrupt-'))).toBe(true);
+  });
+});
+
 describe('session linking', () => {
   it('ignores sessions outside clean-room', () => {
     expect(reg.ingest(ev({ kind: 'start', cwd: '/home/someone/elsewhere' }))).toBe(false);
@@ -38,6 +59,15 @@ describe('session linking', () => {
     reg.ingest(ev({ kind: 'start', sessionId: 'b', pid: 42, source: 'clear' }));
     expect(reg.all()).toHaveLength(1);
     expect(reg.all()[0].sessionIds).toEqual(['a', 'b']);
+  });
+
+  it("/clear whose old session's end arrives after the new session's start keeps the crate live", () => {
+    reg.ingest(ev({ kind: 'prompt', sessionId: 'a', pid: 42, prompt: 'x' }));
+    reg.ingest(ev({ kind: 'start', sessionId: 'b', pid: 42, source: 'clear' }));
+    reg.ingest(ev({ kind: 'end', sessionId: 'a', pid: 42, reason: 'clear' }));
+    expect(reg.all()).toHaveLength(1);
+    expect(reg.all()[0]).toMatchObject({ sessionIds: ['a', 'b'], endedAt: undefined });
+    expect(reg.all()[0].zone).not.toBe('storage');
   });
 
   it('links events from a factory terminal slot to its pre-registered crate', () => {

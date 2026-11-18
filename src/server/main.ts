@@ -101,7 +101,9 @@ app.route('GET', '/api/state', () => state());
 /** Ends a crate's factory terminal (clean /exit when Claude is idle) and moves the crate to storage. */
 async function endSession(crate: Crate): Promise<void> {
   if (!crate.slot || !(await liveTerminal(crate))) return;
-  await terminals.end(crate.slot, crate.zone === 'dock' || crate.zone === 'intake');
+  // /exit only once Claude itself is running and idle; before its first hook, scrub-in may still own the terminal.
+  const claudeIdle = crate.sessionIds.length > 0 && (crate.zone === 'dock' || crate.zone === 'intake');
+  await terminals.end(crate.slot, claudeIdle);
   registry.markEnded(crate.id, Date.now());
   broadcast();
 }
@@ -129,6 +131,7 @@ app.route('POST', '/api/crates/:id/rename', async (body, { id }) => {
   const name = String(body.name ?? '').replace(/\s+/g, ' ').trim();
   if (!name) throw new HttpError(400, 'A name is needed.');
   if (!(await liveTerminal(crate))) throw new HttpError(409, 'This session runs outside the factory: rename it in its own terminal with /rename.');
+  if (!crate.sessionIds.length) throw new HttpError(409, "Claude hasn't started in this terminal yet; rename it once it has.");
   if (crate.zone !== 'dock' && crate.zone !== 'intake') throw new HttpError(409, 'Claude is busy in this session; rename it once it is waiting for you.');
   await terminals.sendLine(crate.slot!, `/rename ${name}`);
   registry.setTitle(id, name);
