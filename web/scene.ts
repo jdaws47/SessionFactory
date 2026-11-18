@@ -24,6 +24,7 @@ const C = {
   machineTop: '#565c66',
   machineBottom: '#30343a',
   alert: '#ef4444',
+  awaiting: '#facc15',
   ship: '#34d399',
   plant: '#2f7466',
   plantTip: '#62d1b2',
@@ -853,7 +854,8 @@ export class Scene {
       const stack = { x: m.pos.x + MACHINE_W / 2 - 18, y: m.pos.y - MACHINE_H / 2 - 16 };
       const mode = m.crate ? (m.crate.zone === 'alert' ? 'jammed' : 'working') : 'idle';
       this.smoke.source(`stack-${m.index}`, stack, mode === 'working', 'stack');
-      this.smoke.source(`belch-${m.index}`, stack, mode === 'jammed', 'belch');
+      // Blocked machines belch; one simply awaiting your reply sits quiet.
+      this.smoke.source(`belch-${m.index}`, stack, mode === 'jammed' && m.crate?.alertReason !== 'asked a question', 'belch');
     }
 
     const q = this.highlight.trim().toLowerCase();
@@ -880,21 +882,31 @@ export class Scene {
     ctx.restore();
   }
 
-  /** Live tag beside the assembly hall title, only while some machine is jammed waiting on you. */
+  /**
+   * Live tags beside the assembly hall title while machines wait on you: red for sessions blocked on a prompt
+   * (permission, the question tool), yellow for ones whose last message asked you something in plain text.
+   */
   private drawJamTag(ctx: CanvasRenderingContext2D): void {
-    const jammed = [...this.crates.values()].filter((c) => !c.archived && c.zone === 'alert').length;
-    if (!jammed) return;
+    const waiting = [...this.crates.values()].filter((c) => !c.archived && c.zone === 'alert');
+    const asked = waiting.filter((c) => c.alertReason === 'asked a question').length;
+    const blocked = waiting.length - asked;
+    const tags = [
+      ...(blocked ? [{ label: `${blocked} jammed · blocked on you`, fill: C.alert, ink: '#fff' }] : []),
+      ...(asked ? [{ label: `${asked} awaiting your reply`, fill: C.awaiting, ink: '#1c1917' }] : []),
+    ];
+    if (!tags.length) return;
     const a = AREAS.working;
     ctx.font = '800 13px system-ui, sans-serif';
-    const titleW = ctx.measureText(a.title).width;
-    const left = a.x + 16 + titleW + 30;
-    const label = `${jammed} jammed · need${jammed === 1 ? 's' : ''} you`;
+    let left = a.x + 16 + ctx.measureText(a.title).width + 30;
     ctx.font = '800 11px system-ui, sans-serif';
-    const w = ctx.measureText(label).width + 16;
-    fillSquircle(ctx, left, a.y + 13, w, 22, RADIUS.small, C.alert);
-    ctx.fillStyle = '#fff';
     ctx.textAlign = 'left';
-    ctx.fillText(label, left + 8, a.y + 28);
+    for (const tag of tags) {
+      const w = ctx.measureText(tag.label).width + 16;
+      fillSquircle(ctx, left, a.y + 13, w, 22, RADIUS.small, tag.fill);
+      ctx.fillStyle = tag.ink;
+      ctx.fillText(tag.label, left + 8, a.y + 28);
+      left += w + 8;
+    }
   }
 
   private machineStates(): { pos: Point; index: number; crate?: CrateView }[] {
@@ -1277,13 +1289,21 @@ function modeOf(crate: CrateView | undefined): MachineMode {
   return crate.zone === 'alert' ? 'jammed' : 'working';
 }
 
+/** Jam colours: red when blocked on a prompt, yellow when its last message asked you something. */
+function jamColors(crate: CrateView | undefined): { fill: string; glow: string; cog: string; ink: string } {
+  return crate?.alertReason === 'asked a question'
+    ? { fill: C.awaiting, glow: 'rgba(250,204,21,0.5)', cog: '#fde047', ink: '#1c1917' }
+    : { fill: C.alert, glow: 'rgba(239,68,68,0.5)', cog: '#f87171', ink: '#fff' };
+}
+
 /** Machine housing behind the crate: snug around it, with stack, lamp and status band. */
 function machineBack(ctx: CanvasRenderingContext2D, pos: Point, t: number, index: number, crate: CrateView | undefined): void {
   const mode = modeOf(crate);
+  const jam = jamColors(crate);
   const x = pos.x - MACHINE_W / 2;
   const y = pos.y - MACHINE_H / 2;
   ctx.save();
-  ctx.shadowColor = mode === 'jammed' ? 'rgba(239,68,68,0.5)' : mode === 'working' ? 'rgba(246,181,69,0.35)' : 'rgba(0,0,0,0.5)';
+  ctx.shadowColor = mode === 'jammed' ? jam.glow : mode === 'working' ? 'rgba(246,181,69,0.35)' : 'rgba(0,0,0,0.5)';
   ctx.shadowBlur = mode === 'idle' ? 10 : 20;
   ctx.shadowOffsetY = mode === 'idle' ? 4 : 0;
   const body = ctx.createLinearGradient(0, y, 0, y + MACHINE_H);
@@ -1294,11 +1314,11 @@ function machineBack(ctx: CanvasRenderingContext2D, pos: Point, t: number, index
   ctx.save();
   squirclePath(ctx, x, y, MACHINE_W, MACHINE_H, RADIUS.large);
   ctx.clip();
-  ctx.fillStyle = mode === 'jammed' ? C.alert : mode === 'working' ? C.orange : '#6b6258';
+  ctx.fillStyle = mode === 'jammed' ? jam.fill : mode === 'working' ? C.orange : '#6b6258';
   ctx.fillRect(x, y, MACHINE_W, 7);
   ctx.restore();
   fillSquircle(ctx, x + MACHINE_W - 24, y - 12, 13, 16, RADIUS.small, '#4a4e55');
-  fillSquircle(ctx, x + 6, y + 11, 7, 7, 2, mode === 'jammed' ? C.alert : mode === 'working' ? '#4ade80' : '#3b3f45');
+  fillSquircle(ctx, x + 6, y + 11, 7, 7, 2, mode === 'jammed' ? jam.fill : mode === 'working' ? '#4ade80' : '#3b3f45');
 }
 
 /**
@@ -1318,8 +1338,10 @@ function strain(t: number, offset: number): number {
  */
 function machineFront(ctx: CanvasRenderingContext2D, pos: Point, t: number, crate: CrateView | undefined): void {
   const mode = modeOf(crate);
-  const color = mode === 'working' ? C.amber : mode === 'jammed' ? '#f87171' : '#5b5f66';
-  const spin = mode === 'working' ? t / 750 : mode === 'jammed' ? strain(t, pos.x) : 0;
+  const jam = jamColors(crate);
+  const color = mode === 'working' ? C.amber : mode === 'jammed' ? jam.cog : '#5b5f66';
+  const awaiting = crate?.alertReason === 'asked a question';
+  const spin = mode === 'working' ? t / 750 : mode === 'jammed' && !awaiting ? strain(t, pos.x) : 0;
   cog(ctx, pos.x - MACHINE_W / 2 + 10, pos.y + 6, 22, spin, color);
   cog(ctx, pos.x + MACHINE_W / 2 - 10, pos.y + 6, 22, -spin, color);
   if (!crate) return;
@@ -1328,11 +1350,11 @@ function machineFront(ctx: CanvasRenderingContext2D, pos: Point, t: number, crat
   if (mode === 'jammed') {
     const by = topRow ? pos.y - MACHINE_H / 2 - 22 : pos.y + MACHINE_H / 2 - 14;
     ctx.save();
-    ctx.shadowColor = C.alert;
+    ctx.shadowColor = jam.fill;
     ctx.shadowBlur = 16;
-    fillSquircle(ctx, pos.x - 18, by, 36, 36, RADIUS.medium, C.alert);
+    fillSquircle(ctx, pos.x - 18, by, 36, 36, RADIUS.medium, jam.fill);
     ctx.restore();
-    ctx.fillStyle = '#fff';
+    ctx.fillStyle = jam.ink;
     ctx.font = '900 24px system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('!', pos.x, by + 27);

@@ -83,6 +83,9 @@ describe('zone state machine', () => {
     for (const waiting of ['Want me to pull those rows? Or I can write the tests first.', 'Tell me when the branch is ready and I\'ll start.', 'Say the word and I\'ll apply it.']) {
       expect(run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', lastMessage: `Here is the plan.\n\n${waiting}` }).zone).toBe('alert');
     }
+    // An open invitation to report back isn't waiting on you.
+    const invited = run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', lastMessage: "Committed and built; reload to see it. I haven't seen it on screen, so tell me if the yellow is hard to read against the platform." });
+    expect(invited.zone).toBe('dock');
     const codeQuestion = run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', lastMessage: 'Done.\n\n```ts\nconst x = a ? b : c?\n```' });
     expect(codeQuestion.zone).toBe('dock');
   });

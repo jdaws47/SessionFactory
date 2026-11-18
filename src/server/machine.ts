@@ -9,7 +9,7 @@ export function isSyntheticPrompt(prompt: string | undefined): boolean {
 }
 
 /** Ways a closing paragraph waits for a go-ahead without a question mark. */
-const ASKING = /\b(let me know|tell me (when|which|what|if)|say the word|say go|when you say|if (that|this) (works|sounds|matches)|unless you|your call|up to you|want me to|should i|shall i)\b/i;
+const ASKING = /\b(let me know (which|what|when|whether|how)|tell me (when|which|what|whether)|say the word|say go|when you say|if (that|this) (works|sounds|matches)|unless you|your call|up to you|want me to|should i|shall i)\b/i;
 
 /**
  * Whether Claude's last message ends by asking you something: its final paragraph has a question or waits for a
