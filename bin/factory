@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# Runs the Session Factory server in the background, detached from any terminal.
+#   factory start [--quiet]  build the front end and start the server (does nothing if it is already up)
+#   factory stop             stop the server (factory terminals keep running in their own tmux server)
+#   factory restart          stop, rebuild and start, to pick up changes
+#   factory status           whether it is up, since when, and how many factory terminals are open
+#   factory logs             follow the server log
+# Start it from a shell that has run scrub-in, so the server gets the JIRA_* variables for the ticket hopper.
+set -euo pipefail
+
+repo="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+port="${SF_PORT:-4477}"
+run="$repo/run"
+pidfile="$run/server.$port.pid"
+log="$run/server.$port.log"
+url="http://127.0.0.1:$port"
+mkdir -p "$run"
+
+pid() {
+  local p
+  p="$(cat "$pidfile" 2>/dev/null || true)"
+  if [[ -n "$p" ]] && kill -0 "$p" 2>/dev/null; then echo "$p"; fi
+}
+
+answering() {
+  curl -s -m 2 -o /dev/null -H "Host: 127.0.0.1:$port" "$url/api/state"
+}
+
+start() {
+  local quiet="${1:-}"
+  if [[ -n "$(pid)" ]]; then
+    [[ "$quiet" == --quiet ]] || echo "Session Factory is already running at $url (pid $(pid))"
+    return 0
+  fi
+  if answering; then
+    echo "Something else is already serving $url (an npm start in a terminal?). Stop it first." >&2
+    return 1
+  fi
+  # Keep one previous log around.
+  if [[ -f "$log" && $(stat -c %s "$log") -gt 1048576 ]]; then mv -f "$log" "$log.1"; fi
+  (cd "$repo" && node_modules/.bin/vite build --logLevel error) >>"$log" 2>&1 || {
+    echo "Front-end build failed; see $log" >&2
+    return 1
+  }
+  # setsid: its own session and process group, so closing this terminal doesn't stop it and stop can end the group.
+  cd "$repo"
+  echo "--- start $(date '+%F %T')" >>"$log"
+  setsid node_modules/.bin/tsx src/server/main.ts </dev/null >>"$log" 2>&1 &
+  echo $! >"$pidfile"
+  for _ in $(seq 1 40); do
+    if answering; then
+      [[ "$quiet" == --quiet ]] || echo "Session Factory started at $url (pid $(cat "$pidfile"))"
+      [[ "$quiet" != --quiet ]] || echo "Session Factory started at $url"
+      return 0
+    fi
+    if [[ -z "$(pid)" ]]; then break; fi
+    sleep 0.25
+  done
+  echo "Session Factory did not come up; last lines of $log:" >&2
+  tail -n 15 "$log" >&2
+  return 1
+}
+
+stop() {
+  local p
+  p="$(pid)"
+  if [[ -z "$p" ]]; then
+    echo "Session Factory is not running"
+    rm -f "$pidfile"
+    return 0
+  fi
+  kill -TERM -- "-$p" 2>/dev/null || kill -TERM "$p"
+  for _ in $(seq 1 20); do
+    kill -0 "$p" 2>/dev/null || break
+    sleep 0.25
+  done
+  if kill -0 "$p" 2>/dev/null; then kill -KILL -- "-$p" 2>/dev/null || kill -KILL "$p"; fi
+  rm -f "$pidfile"
+  echo "Session Factory stopped"
+}
+
+status() {
+  local p terminals
+  p="$(pid)"
+  terminals="$(tmux -S "$run/tmux.sock" list-sessions -F '#{session_name}' 2>/dev/null | grep -c '^sf-' || true)"
+  if [[ -n "$p" ]]; then
+    if answering; then
+      echo "Session Factory: running at $url (pid $p, up $(ps -o etime= -p "$p" | tr -d ' '))"
+    else
+      echo "Session Factory: process $p is up but $url is not answering; see factory logs"
+    fi
+  elif answering; then
+    echo "Session Factory: $url is answering, but not started by factory (an npm start in a terminal?)"
+  else
+    echo "Session Factory: stopped"
+  fi
+  echo "Factory terminals: ${terminals:-0} open"
+  echo "Log: $log"
+}
+
+case "${1:-status}" in
+  start) start "${2:-}" ;;
+  stop) stop ;;
+  restart) stop >/dev/null; start ;;
+  status) status ;;
+  logs) touch "$log"; tail -n 50 -f "$log" ;;
+  *)
+    sed -n '2,8p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    exit 2
+    ;;
+esac

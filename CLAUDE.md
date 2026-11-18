@@ -15,6 +15,9 @@ npm install                      # .npmrc sets legacy-peer-deps (npm 10 peer-res
 # Run locally (builds the front end, then serves http://127.0.0.1:4477)
 npm start
 
+# Run in the background, detached from any terminal (pid and log in run/; terminals live on in tmux)
+bin/factory start [--quiet] | stop | restart | status | logs
+
 # Dev: backend with reload + Vite dev server (http://127.0.0.1:5173, proxies /api and /ws)
 npm run dev:server
 npm run dev:web
@@ -38,6 +41,7 @@ Environment: `SF_PORT` (default 4477), `SF_DATA_DIR` (default `./data`), `SF_JIR
 hooks/emit-event      Observe-only hook: appends the hook JSON to data/events/, always exits 0, prints nothing
 scripts/hooks.mjs     Install/remove the hooks block; remove restores settings.local.json byte-for-byte
 bin/sf                Start/attach factory terminals from any shell
+bin/factory           Background server control: start/stop/restart/status/logs (setsid, pid + log in run/)
 tmux.conf             Config for the private tmux server (socket run/tmux.sock)
 src/shared/types.ts   Crate / state types shared by server and web
 src/server/
