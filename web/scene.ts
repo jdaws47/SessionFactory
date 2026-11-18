@@ -39,7 +39,7 @@ interface Leg {
   to: SlotRef;
 }
 
-interface Sprite {
+export interface Sprite {
   x: number;
   y: number;
   /** Where the crate is heading (or sits); used to keep slots sticky. */
@@ -270,6 +270,19 @@ export class Scene {
 
   /** Called when the view should follow the train (set by main so the UI updates too). */
   onFollowTrain?: (where: 'factory' | 'warehouse') => void;
+
+  /** The simulation's live state, for tests and debugging. Not for the UI: it reads crates through setCrates(). */
+  inspect() {
+    return {
+      sprites: this.sprites,
+      dockQueue: this.dockQueue as readonly string[],
+      gantryJobs: this.gantryJobs as ReadonlyMap<string, 'store' | 'fetch'>,
+      cranes: this.cranes,
+      gantry: this.gantry,
+      drawOrder: () => this.drawOrder(),
+      pileOffset: (s: Sprite) => this.pileOffset(s),
+    };
+  }
   /** A recalled crate's train has left the warehouse while you watched; follow it once it crosses the page edge. */
   private followHome = false;
   /** Counts crates coming to rest, to order piles by arrival. */

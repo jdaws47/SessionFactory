@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { LOOP, NET } from '../web/belts';
-import { Scene } from '../web/scene';
+import { Scene, type Sprite } from '../web/scene';
 import { WAREHOUSE_X } from '../web/warehouse';
 import type { CrateView } from '../src/shared/types';
 
@@ -8,8 +8,7 @@ function crate(id: string, zone: CrateView['zone'], zoneSince: number): CrateVie
   return { id, sessionIds: [id], cwd: '/cr', repo: 'cr', label: id, labelSource: 'auto', zone, zoneSince, turns: 2, startedAt: zoneSince, updatedAt: zoneSince, archived: false, archiveCount: 0, reactivationCount: 0 };
 }
 
-type Sprite = { x: number; y: number; path: { track?: unknown }[]; next?: { path: { track?: unknown }[] } };
-const sprite = (scene: Scene, id: string) => (scene as unknown as { sprites: Map<string, Sprite> }).sprites.get(id)!;
+const sprite = (scene: Scene, id: string) => scene.inspect().sprites.get(id)!;
 const route = (s: Sprite) => [...s.path, ...(s.next?.path ?? [])];
 const recycles = (s: Sprite) => route(s).some((p) => p.track === NET.dock.recycle!.track);
 const usesDockBelt = (s: Sprite) => route(s).some((p) => p.track === NET.dock.track);
@@ -90,7 +89,7 @@ describe('dock order', () => {
     crates = crates.map((c) => (c.id === 'B' ? { ...c, zone: 'working', zoneSince: 400 } : c));
     scene.setCrates(crates, 1100);
     step(scene, 60);
-    const internals = scene as unknown as { dockQueue: string[] };
+    const internals = scene.inspect();
     expect(internals.dockQueue).toEqual(['A', 'C']);
     expect(sprite(scene, 'A').x).toBeLessThan(sprite(scene, 'C').x);
   });
@@ -116,7 +115,7 @@ describe('crates never drive through each other', () => {
     let crates = ids.map((id, i) => crate(id, zones[i % zones.length], i));
     let clock = 1000;
     scene.setCrates(crates, clock);
-    const internals = scene as unknown as { sprites: Map<string, Sprite & { at: { zone: string; slot: number }; pileRank: number }>; cranes: Record<string, { holding: string | null }> };
+    const internals = scene.inspect();
     let worst = 0;
     let worstPair = '';
     let overlapFrames = 0;
@@ -204,12 +203,7 @@ describe('rerouting on the loop', () => {
 describe('cranes set crates down where they stay', () => {
   it('a crate lowered onto a pile or into the wagon never moves once it is down', () => {
     const scene = new Scene();
-    const internals = scene as unknown as {
-      sprites: Map<string, Sprite & { stage?: string }>;
-      cranes: Record<string, { holding: string | null }>;
-      gantry: { holding: string | null };
-      pileOffset(s: unknown): { x: number; y: number };
-    };
+    const internals = scene.inspect();
     const cap = NET.storage.slots.length;
     const full = Array.from({ length: cap }, (_, i) => crate(`s${i}`, 'storage', i));
     const movers = ['A', 'B', 'C'].map((id, i) => crate(id, 'dock', 10 + i));
@@ -269,8 +263,7 @@ describe('layout bookkeeping', () => {
 });
 
 describe('crates leaving mid-job', () => {
-  type Internals = { sprites: Map<string, { wagonSlot?: number; stage?: string }>; gantryJobs: Map<string, string>; cranes: Record<string, { holding: string | null }>; gantry: { holding: string | null } };
-  const inside = (scene: Scene) => scene as unknown as Internals;
+  const inside = (scene: Scene) => scene.inspect();
 
   it('a crate brought back while the freight crane holds it gives up its place in the wagon', () => {
     const scene = new Scene();
@@ -305,7 +298,7 @@ describe('crates leaving mid-job', () => {
 });
 
 describe('cranes never deadlock', () => {
-  const stageOf = (scene: Scene, id: string) => (scene as unknown as { sprites: Map<string, { stage?: string }> }).sprites.get(id)!.stage;
+  const stageOf = (scene: Scene, id: string) => (scene.inspect()).sprites.get(id)!.stage;
   const moving = (scene: Scene, id: string) => {
     const s = sprite(scene, id);
     return s.path.length > 0 || !!s.next;
@@ -345,8 +338,7 @@ describe('cranes never deadlock', () => {
 });
 
 describe('piles', () => {
-  type Internals = { sprites: Map<string, { at: { slot: number }; pileRank: number }>; drawOrder(): [string, unknown][]; pileOffset(s: unknown): { x: number; y: number } };
-  const internals = (scene: Scene) => scene as unknown as Internals;
+  const internals = (scene: Scene) => scene.inspect();
 
   it('stack in the order crates are physically placed there, not by session timestamps', () => {
     const scene = new Scene();
@@ -356,7 +348,7 @@ describe('piles', () => {
     const last = crate('last', 'dock', 1);
     scene.setCrates([...full, first, last], 1000);
     const { sprites } = internals(scene);
-    const resting = () => [...sprites.values()].every((s) => (s as unknown as { settled?: number }).settled !== undefined);
+    const resting = () => [...sprites.values()].every((s) => s.settled !== undefined);
     // "first" is placed on the pile first, even though its session's timestamp is the newer one.
     scene.setCrates([...full, { ...first, zone: 'storage', zoneSince: 60 }, last], 2000);
     step(scene, 120, resting);
@@ -369,7 +361,7 @@ describe('piles', () => {
     };
     expect(inFront()).toBe(true);
     // Crates set down by different routes can rest a hair apart; the one placed last still goes in front.
-    (sprites.get('first') as unknown as Sprite).y += 0.01;
+    sprites.get('first')!.y += 0.01;
     expect(inFront()).toBe(true);
   });
 
@@ -385,7 +377,7 @@ describe('piles', () => {
     // Drawn bottom to top in arrival order, each one higher than the one under it.
     const order = internals(scene).drawOrder().map(([id]) => id).filter((id) => pile.includes(id));
     expect(order).toEqual(pile);
-    const heights = pile.map((id) => internals(scene).pileOffset(sprites.get(id)).y);
+    const heights = pile.map((id) => internals(scene).pileOffset(sprites.get(id)!).y);
     expect(heights[1]).toBeLessThan(heights[0]);
     expect(heights[2]).toBeLessThan(heights[1]);
 
@@ -398,8 +390,7 @@ describe('piles', () => {
 });
 
 describe('freight train and warehouse', () => {
-  type Stage = Sprite & { stage?: string; at: { zone: string; slot: number } };
-  const st = (scene: Scene, id: string) => (scene as unknown as { sprites: Map<string, Stage> }).sprites.get(id)!;
+  const st = (scene: Scene, id: string) => (scene.inspect()).sprites.get(id)!;
 
   it('crates in the wagon stack like a pile: the one loaded last sits on top, in front', () => {
     const scene = new Scene();
@@ -411,7 +402,7 @@ describe('freight train and warehouse', () => {
     step(scene, 120, () => scene.train.cargo.length === 2);
     const [first, last] = scene.train.cargo;
     expect(st(scene, last).y).toBeLessThan(st(scene, first).y);
-    const order = (scene as unknown as { drawOrder(): [string, unknown][] }).drawOrder().map(([id]) => id);
+    const order = (scene.inspect()).drawOrder().map(([id]) => id);
     expect(order.indexOf(last)).toBeGreaterThan(order.indexOf(first));
 
     // At the warehouse the gantry unloads from the top: last loaded, first off.
@@ -433,7 +424,7 @@ describe('freight train and warehouse', () => {
     step(scene, 240, () => scene.train.cargo.length === 2 && scene.train.heading < 0);
     const loaded = [...scene.train.cargo];
     expect(loaded).toHaveLength(2);
-    const freight = (scene as unknown as { cranes: { freight: { holding: string | null } } }).cranes.freight;
+    const freight = (scene.inspect()).cranes.freight;
     let firstOff: string | null = null;
     step(scene, 60, () => (firstOff = freight.holding) !== null);
     expect(firstOff).toBe(loaded[1]);
