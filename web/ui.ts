@@ -1,7 +1,7 @@
 import type { CrateView, FactoryState, HopperTicket } from '../src/shared/types';
 import { AlertNotifier } from './alerts';
 import { get, post } from './api';
-import { crateColor } from './scene';
+import { crateColor } from './paint';
 import { AttachedTerminal } from './terminal';
 
 export interface Action {

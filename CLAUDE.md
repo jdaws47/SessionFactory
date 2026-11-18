@@ -57,7 +57,8 @@ src/server/
   main.ts             Wiring, REST routes, state broadcast
 web/
   layout.ts           Fixed 1600x900 floor: areas and props
-  scene.ts            Canvas drawing and crate movement along belts
+  scene.ts            Crate simulation (belts, piles, cranes, train, warehouse) and the scene's own draw passes
+  paint.ts            Stateless painting: palette, drawing helpers, scenery, belts, machines, cranes, operator
   belts.ts            One-way belt network: clockwise loop; one belt per zone (loop → zone → loop); every slot is on a
                       zone belt (dock/intake queues) or has its own in/out branch (assemblers, alert, storage). travel() routes
   shapes.ts           Squircle helpers; the canvas never draws true circles or ovals
