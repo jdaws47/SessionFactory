@@ -33,13 +33,25 @@ export class HttpError extends Error {
   }
 }
 
+/** decodeURIComponent that returns null for malformed input instead of throwing. */
+function decode(text: string): string | null {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return null;
+  }
+}
+
 function match(parts: string[], url: string): Params | null {
   const segs = url.split('/').filter(Boolean);
   if (segs.length !== parts.length) return null;
   const params: Params = {};
   for (let i = 0; i < parts.length; i++) {
-    if (parts[i].startsWith(':')) params[parts[i].slice(1)] = decodeURIComponent(segs[i]);
-    else if (parts[i] !== segs[i]) return null;
+    if (parts[i].startsWith(':')) {
+      const value = decode(segs[i]);
+      if (value === null) return null;
+      params[parts[i].slice(1)] = value;
+    } else if (parts[i] !== segs[i]) return null;
   }
   return params;
 }
@@ -58,7 +70,13 @@ export class FactoryServer {
     private readonly staticDir: string,
     private readonly allowedHosts: string[],
   ) {
-    this.server = http.createServer((req, res) => void this.handle(req, res));
+    // Nothing a request does may take the server down: an unexpected throw is a 500, never an unhandled rejection.
+    this.server = http.createServer((req, res) =>
+      this.handle(req, res).catch(() => {
+        if (!res.headersSent) res.writeHead(500);
+        res.end();
+      }),
+    );
     this.server.on('upgrade', (req, socket, head) => this.upgrade(req, socket, head));
   }
 
@@ -117,7 +135,12 @@ export class FactoryServer {
 
   private serveStatic(pathname: string, res: http.ServerResponse): void {
     const root = path.resolve(this.staticDir);
-    let file = path.resolve(root, `.${decodeURIComponent(pathname)}`);
+    const decoded = decode(pathname);
+    if (decoded === null) {
+      res.writeHead(400).end();
+      return;
+    }
+    let file = path.resolve(root, `.${decoded}`);
     if (!file.startsWith(root + path.sep) && file !== root) {
       res.writeHead(404).end();
       return;
@@ -132,12 +155,26 @@ export class FactoryServer {
   }
 
   private upgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer): void {
-    const url = new URL(req.url ?? '/', 'http://localhost');
-    const route = this.sockets.map((r) => ({ r, params: match(r.parts, url.pathname) })).find((x) => x.params);
-    if (!route || !this.allowed(req)) {
+    socket.on('error', () => socket.destroy());
+    if (!this.allowed(req)) {
       socket.destroy();
       return;
     }
-    this.wss.handleUpgrade(req, socket, head, (ws) => route.r.handler(ws, route.params!, url.searchParams));
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const route = this.sockets.map((r) => ({ r, params: match(r.parts, url.pathname) })).find((x) => x.params);
+    if (!route) {
+      socket.destroy();
+      return;
+    }
+    this.wss.handleUpgrade(req, socket, head, (ws) => {
+      // A protocol error (bad frame) is that socket's problem: close it rather than crash on an unhandled 'error'.
+      ws.on('error', () => ws.terminate());
+      try {
+        const done = route.r.handler(ws, route.params!, url.searchParams) as unknown;
+        if (done instanceof Promise) done.catch(() => ws.terminate());
+      } catch {
+        ws.terminate();
+      }
+    });
   }
 }

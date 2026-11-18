@@ -28,17 +28,20 @@ export class EventIngestor {
     try {
       fs.mkdirSync(this.dir, { recursive: true });
       this.watcher = fs.watch(this.dir, () => this.drain());
-      this.watcher.on('error', () => {
-        // e.g. the folder was deleted: start over (the sweep re-creates the watcher) and pick up what's waiting.
-        this.watcher?.close();
-        this.watcher = undefined;
-        if (this.watch()) this.drain();
-      });
+      this.watcher.on('error', () => this.rewatch());
       return true;
     } catch {
       this.watcher = undefined;
       return false;
     }
+  }
+
+  /** The folder was deleted or the watcher died: watch a fresh folder (the hook re-creates it on its next event). */
+  private rewatch(): void {
+    this.watcher?.close();
+    this.watcher = undefined;
+    if (this.timer) return; // already polling
+    if (this.watch()) this.drain();
   }
 
   stop(): void {
@@ -50,8 +53,15 @@ export class EventIngestor {
     if (this.draining) return;
     this.draining = true;
     try {
-      const files = fs
-        .readdirSync(this.dir)
+      let names: string[];
+      try {
+        names = fs.readdirSync(this.dir);
+      } catch {
+        this.draining = false;
+        this.rewatch();
+        return;
+      }
+      const files = names
         .filter((f) => /^\d+-.*\.json$/.test(f))
         .sort();
       for (const f of files) this.consume(path.join(this.dir, f));
