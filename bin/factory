@@ -94,6 +94,13 @@ status() {
   else
     echo "Session Factory: stopped"
   fi
+  if answering; then
+    if curl -s -m 2 -H "Host: 127.0.0.1:$port" "$url/api/state" | grep -q '"jira":true'; then
+      echo "Jira hopper: on"
+    else
+      echo "Jira hopper: off (server has no JIRA_* variables)"
+    fi
+  fi
   echo "Factory terminals: ${terminals:-0} open"
   echo "Log: $log"
 }
