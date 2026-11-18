@@ -181,6 +181,9 @@ export class Scene {
     const dockBelt = NET.dock.track;
 
     const byZone = new Map<Area, CrateView[]>();
+    // Only crates still on the floor can be waiting to leave the dock; drop any that were archived or removed.
+    const onFloor = new Set(crates.filter((c) => !c.archived).map((c) => c.id));
+    for (const id of this.pendingLeave) if (!onFloor.has(id)) this.pendingLeave.delete(id);
     for (const c of crates) {
       if (c.archived) continue;
       let area = floorArea(c.zone, c.turns);
@@ -245,8 +248,12 @@ export class Scene {
     for (const [id, s] of this.sprites) {
       const c = this.crates.get(id);
       if (!c) {
+        // Gone from the factory altogether: nothing may keep waiting on it.
         this.sprites.delete(id);
         this.stacks.remove(id);
+        this.gantryJobs.delete(id);
+        this.train.cargo = this.train.cargo.filter((cid) => cid !== id);
+        for (const crane of [...Object.values(this.cranes), this.gantry]) crane.cancel(id);
       } else if (c.archived && !s.leaving && !s.stage) {
         this.go(s, { zone: 'freight', slot: 0 });
         s.leaving = true;
@@ -357,9 +364,10 @@ export class Scene {
       return;
     }
     if (s.leaving) {
-      // Still on its way to freight: just turn it round.
+      // Still on its way to freight: just turn it round (and give up any place it had in the wagon).
       s.leaving = false;
       s.loading = undefined;
+      s.wagonSlot = undefined;
     }
     s.pileRank = pileRank;
     s.pileSize = pileSize;

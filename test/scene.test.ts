@@ -245,6 +245,65 @@ describe('cranes set crates down where they stay', () => {
   });
 });
 
+describe('layout bookkeeping', () => {
+  it('a crate rerouted while riding into the dock and then archived does not keep the layout re-running', () => {
+    const scene = new Scene();
+    const a = crate('A', 'dock', 1);
+    const x = crate('X', 'working', 2);
+    scene.setCrates([a, x], 1000);
+    step(scene, 5);
+    scene.setCrates([a, { ...x, zone: 'dock', zoneSince: 3 }], 2000);
+    step(scene, 20, () => sprite(scene, 'X').path[0]?.track === NET.dock.track);
+    scene.setCrates([a, { ...x, zone: 'working', zoneSince: 4 }], 3000);
+    scene.setCrates([a, { ...x, zone: 'working', zoneSince: 4, archived: true, archivedAt: 5 }], 4000);
+    step(scene, 120);
+    let layouts = 0;
+    const original = scene.setCrates.bind(scene);
+    scene.setCrates = (...args) => {
+      layouts++;
+      return original(...args);
+    };
+    step(scene, 2);
+    expect(layouts).toBe(0);
+  });
+});
+
+describe('crates leaving mid-job', () => {
+  type Internals = { sprites: Map<string, { wagonSlot?: number; stage?: string }>; gantryJobs: Map<string, string>; cranes: Record<string, { holding: string | null }>; gantry: { holding: string | null } };
+  const inside = (scene: Scene) => scene as unknown as Internals;
+
+  it('a crate brought back while the freight crane holds it gives up its place in the wagon', () => {
+    const scene = new Scene();
+    const a = crate('A', 'storage', 1);
+    const b = crate('B', 'storage', 2);
+    scene.setCrates([a, b], 1000);
+    step(scene, 3);
+    scene.setCrates([{ ...a, archived: true, archivedAt: 5 }, b], 2000);
+    step(scene, 60, () => inside(scene).cranes.freight.holding === 'A');
+    expect(inside(scene).cranes.freight.holding).toBe('A');
+    scene.setCrates([a, b], 3000);
+    step(scene, 60);
+    scene.setCrates([a, { ...b, archived: true, archivedAt: 6 }], 4000);
+    step(scene, 60, () => inside(scene).sprites.get('B')!.wagonSlot !== undefined);
+    expect(inside(scene).sprites.get('B')!.wagonSlot).toBe(0);
+  });
+
+  it('a crate dropped from the factory during a gantry job does not strand the train', () => {
+    const scene = new Scene();
+    const a = { ...crate('A', 'storage', 1), archived: true, archivedAt: 5 };
+    const b = crate('B', 'storage', 2);
+    scene.setCrates([crate('A', 'storage', 1), b], 1000);
+    step(scene, 3);
+    scene.setCrates([a, b], 2000);
+    step(scene, 120, () => inside(scene).gantryJobs.has('A') && inside(scene).gantry.holding !== 'A');
+    expect(inside(scene).gantryJobs.has('A')).toBe(true);
+    scene.setCrates([b], 3000);
+    scene.setCrates([{ ...b, archived: true, archivedAt: 6 }], 3001);
+    step(scene, 300, () => inside(scene).sprites.get('B')!.stage === 'yard');
+    expect(inside(scene).sprites.get('B')!.stage).toBe('yard');
+  });
+});
+
 describe('cranes never deadlock', () => {
   const stageOf = (scene: Scene, id: string) => (scene as unknown as { sprites: Map<string, { stage?: string }> }).sprites.get(id)!.stage;
   const moving = (scene: Scene, id: string) => {
