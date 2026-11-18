@@ -28,9 +28,6 @@ npm run typecheck
 
 # Observe-only hooks in clean-room/.claude/settings.local.json
 npm run hooks -- status | install | remove
-
-# Factory terminals from a shell (scrub-in, then claude, on the private tmux server)
-bin/sf | bin/sf ls | bin/sf attach <slot>
 ```
 
 Environment: `SF_PORT` (default 4477), `SF_DATA_DIR` (default `./data`), `SF_JIRA_PROJECTS` (default `PORT,TF,BIOBK,VIDA,DQI`).
@@ -40,7 +37,6 @@ Environment: `SF_PORT` (default 4477), `SF_DATA_DIR` (default `./data`), `SF_JIR
 ```
 hooks/emit-event      Observe-only hook: appends the hook JSON to data/events/, always exits 0, prints nothing
 scripts/hooks.mjs     Install/remove the hooks block; remove restores settings.local.json byte-for-byte
-bin/sf                Start/attach factory terminals from any shell
 bin/factory           Background server control: start/stop/restart/status/logs (setsid, pid + log in run/)
 tmux.conf             Config for the private tmux server (socket run/tmux.sock)
 src/shared/types.ts   Crate / state types shared by server and web
@@ -96,5 +92,5 @@ npx vitest run test/machine.test.ts
 - **Never touch other Claude config.** The only allowed config change is the `hooks` key in `clean-room/.claude/settings.local.json`; any other change must be flagged to the user first.
 - **Jira is read-only.** Only `search` through the vida-jira CLI; no transitions, comments or edits.
 - **Localhost only.** Bind `127.0.0.1` and keep the Host/Origin checks in `http.ts`; the terminal websocket is a shell.
-- **Claude only starts from clean-room, after scrub-in.** Every launch goes through `claudeCommand()` or `bin/sf`, and only on a user click.
+- **Claude only starts from clean-room, after scrub-in.** Every launch goes through `claudeCommand()`, and only on a user click.
 - **Never auto-run scrub-in in tests or smoke checks.** It logs out of AWS SSO and switches repos to `main`; test the bridge with a harmless command instead.

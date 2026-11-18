@@ -26,12 +26,9 @@ npm start            # http://127.0.0.1:4477
 
 ## Terminals
 
-Click a crate to open its session in a terminal popup (⤢ for full screen; ✕ only detaches, and the session keeps running). This works for **factory terminals**, which are sessions started from:
+Click a crate to open its session in a terminal popup (⤢ for full screen; ✕ only detaches, and the session keeps running). This works for **factory terminals**, which are sessions started from **+ New session** or the hopper on the floor.
 
-- **+ New session** or the hopper on the floor
-- `bin/sf` from any shell, which starts a factory terminal and attaches it right there. Detach with `Ctrl-b d` and reattach with `bin/sf attach <slot>`; list them with `bin/sf ls`
-
-Every factory terminal opens in `clean-room/`, runs `scrub-in`, then `claude`, and closes itself when Claude exits. They run on a private tmux server (socket `run/tmux.sock`) that starts with the first factory terminal and exits with the last one, so they survive closing the browser or restarting the app. `bin/sf stop-all` ends them all (it asks first).
+Every factory terminal opens in `clean-room/`, runs `scrub-in`, then `claude`, and closes itself when Claude exits. They run on a private tmux server (socket `run/tmux.sock`) that starts with the first factory terminal and exits with the last one, so they survive closing the browser or restarting the app.
 
 Sessions you start in an ordinary terminal still show up on the floor, but there's nothing to attach to. Once one ends, **Resume in a factory terminal** brings it back with full context.
 
