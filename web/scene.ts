@@ -497,6 +497,9 @@ export class Scene {
    * (merges, catching up, joining a queue). Crates in the same pile and crates on a crane never block. When two
    * crates block each other, a fixed order lets exactly one go, so nothing waits forever.
    */
+  /** Crates held back by a crane's reserved set-down spot: those never ease through (see update()). */
+  private craneBlocked = new Set<string>();
+
   private blockedCrates(): Set<string> {
     const LOOK = 30;
     const STEP = 6;
@@ -535,10 +538,13 @@ export class Scene {
       for (const r of reserved) {
         if (r.id === id) continue;
         const spot = rect(r.to.x, r.to.y);
-        if (!hits(here, spot) && probes.some((q) => hits(rect(q.x, q.y), spot))) blockers.set(id, (blockers.get(id) ?? new Set()).add(`crane:${r.id}`));
+        // Held back if it would move (further) onto the spot; a crate already on it and moving away is let go.
+        const gap = (p: Point) => Math.hypot(p.x - r.to.x, p.y - r.to.y);
+        if (probes.some((q) => hits(rect(q.x, q.y), spot) && gap(q) < gap(s))) blockers.set(id, (blockers.get(id) ?? new Set()).add(`crane:${r.id}`));
       }
     }
     const blocked = new Set<string>();
+    this.craneBlocked = new Set([...blockers].filter(([, by]) => [...by].some((b) => b.startsWith('crane:'))).map(([id]) => id));
     for (const [id, by] of blockers) {
       if ([...by].some((oid) => !(blockers.get(oid)?.has(id) && id < oid))) blocked.add(id);
     }
@@ -563,7 +569,9 @@ export class Scene {
     const blocked = this.blockedCrates();
     for (const [id, s] of this.sprites) {
       if (!blocked.has(id)) s.waited = 0;
-      else if ((s.waited = (s.waited ?? 0) + dt) > PATIENCE) blocked.delete(id);
+      // Patience settles stand-offs between crates; a spot a crane is about to set a crate on is never eased into,
+      // or the crane would hover over it forever while the crate waits for that same crane.
+      else if ((s.waited = (s.waited ?? 0) + dt) > PATIENCE && !this.craneBlocked.has(id)) blocked.delete(id);
     }
     this.running = new Set([sectionKey(LOOP, 0)]);
     for (const [id, s] of this.sprites) {
@@ -630,6 +638,8 @@ export class Scene {
       },
       done: (id: string) => {
         const s = this.sprites.get(id);
+        // Lifted out of the wagon: its place there is free again.
+        if (s && !s.leaving && !s.stage && s.wagonSlot !== undefined) s.wagonSlot = undefined;
         if (s?.dropLift !== undefined && s.path[0]) {
           // Set down on top of a pile: it rests at the pile's spot, drawn at the height it was lowered to.
           Object.assign(s, { x: s.path[0].x, y: s.path[0].y, lift: s.dropLift, dropLift: undefined });
@@ -643,8 +653,11 @@ export class Scene {
         const at = me?.dropLift !== undefined && me.path[0] ? me.path[0] : to;
         return ![...this.sprites.entries()].some(([oid, o]) => {
           if (oid === except || this.heldBy(oid) || o.loading !== undefined || o.stage) return false;
-          // Crates already stacked in the same pile spot don't stop the crane adding another.
-          const pileMate = mine && !o.path.length && !o.next && o.at.zone === mine.zone && o.at.slot === mine.slot;
+          // A crate on its way along a belt is held back from a reserved spot; only one sitting there is in the way.
+          if ((o.path.length || o.next) && !o.path[0]?.crane) return false;
+          // Crates already stacked in the same pile spot (or the wagon) don't stop the crane adding another.
+          const intoWagon = me?.wagonSlot !== undefined && me.leaving;
+          const pileMate = (mine && !o.path.length && !o.next && o.at.zone === mine.zone && o.at.slot === mine.slot) || (intoWagon && o.wagonSlot !== undefined);
           return !pileMate && Math.abs(o.x - at.x) < CRATE_W - 6 && Math.abs(o.y - at.y) < CRATE_H - 6;
         });
       },
@@ -719,10 +732,13 @@ export class Scene {
       // lifted out (its crane hop is done).
       const lifting = [...this.sprites.values()].some((s) => !s.stage && s.path[0]?.crane === 'freight' && Math.hypot(s.x - FREIGHT.wagon.x, s.y - FREIGHT.wagon.y) < 30);
       const top = [...train.cargo].reverse().find((cid) => this.sprites.get(cid)?.returning);
-      for (const id of lifting || !top ? [] : [top]) {
+      // It comes out over the transfer point, so a crate waiting there to go into the wagon goes in first.
+      const transferBusy = [...this.sprites.values()].some((s) => !s.stage && Math.hypot(s.x - FREIGHT.transfer.x, s.y - FREIGHT.transfer.y) < CRATE_H);
+      for (const id of lifting || transferBusy || !top ? [] : [top]) {
         // Home: the freight crane lifts it out of the wagon onto the belt, and it heads for its spot.
         const s = this.sprites.get(id)!;
-        Object.assign(s, { stage: undefined, returning: false, leaving: false, wagonSlot: undefined });
+        // It keeps its wagon place until the crane has lifted it out, so nothing is set down on it meanwhile.
+        Object.assign(s, { stage: undefined, returning: false, leaving: false });
         // The freight crane lifts it from where it sits in the wagon.
         s.path = [{ x: s.x, y: s.y }, ...travel({ zone: 'freight', slot: 0 }, s.at).slice(1)];
         s.next = undefined;

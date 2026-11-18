@@ -245,6 +245,46 @@ describe('cranes set crates down where they stay', () => {
   });
 });
 
+describe('cranes never deadlock', () => {
+  const stageOf = (scene: Scene, id: string) => (scene as unknown as { sprites: Map<string, { stage?: string }> }).sprites.get(id)!.stage;
+  const moving = (scene: Scene, id: string) => {
+    const s = sprite(scene, id);
+    return s.path.length > 0 || !!s.next;
+  };
+
+  it('a crate leaving storage while another arrives: neither gets stuck at the shared transfer point', () => {
+    // Timings that used to leave the storage crane hovering over a crate waiting for that same crane.
+    for (const delay of [7.25, 8, 9, 9.5]) {
+      const scene = new Scene();
+      const a = crate('A', 'storage', 1);
+      const b = crate('B', 'working', 2);
+      scene.setCrates([a, b], 1000);
+      step(scene, 3);
+      scene.setCrates([a, { ...b, zone: 'storage', zoneSince: 3 }], 2000);
+      step(scene, delay);
+      scene.setCrates([{ ...a, zone: 'working', zoneSince: 4 }, { ...b, zone: 'storage', zoneSince: 3 }], 3000);
+      step(scene, 120);
+      expect([moving(scene, 'A'), moving(scene, 'B')], `delay ${delay}`).toEqual([false, false]);
+    }
+  }, 60_000);
+
+  it('archiving a crate while a recalled one is unloaded at the freight station: both get where they are going', () => {
+    for (const [zone, delay] of [['dock', 1], ['dock', 5], ['working', 3], ['working', 7], ['storage', 20.5]] as const) {
+      const scene = new Scene();
+      const a = crate('A', zone, 1);
+      const b = { ...crate('B', 'storage', 2), archived: true, archivedAt: 5 };
+      scene.setCrates([a, b], 1000);
+      step(scene, 3);
+      scene.setCrates([a, { ...b, archived: false }], 2000);
+      step(scene, delay);
+      scene.setCrates([{ ...a, archived: true, archivedAt: 6 }, { ...b, archived: false }], 3000);
+      step(scene, 300);
+      expect(stageOf(scene, 'A'), `${zone} ${delay}`).toBe('yard');
+      expect([stageOf(scene, 'B'), moving(scene, 'B')], `${zone} ${delay}`).toEqual([undefined, false]);
+    }
+  }, 120_000);
+});
+
 describe('piles', () => {
   type Internals = { sprites: Map<string, { at: { slot: number }; pileRank: number }>; drawOrder(): [string, unknown][]; pileOffset(s: unknown): { x: number; y: number } };
   const internals = (scene: Scene) => scene as unknown as Internals;
