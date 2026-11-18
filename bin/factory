@@ -19,7 +19,8 @@ mkdir -p "$run"
 pid() {
   local p
   p="$(cat "$pidfile" 2>/dev/null || true)"
-  if [[ -n "$p" ]] && kill -0 "$p" 2>/dev/null; then echo "$p"; fi
+  # Only while that process is still our server: after a reboot the number may belong to something else entirely.
+  if [[ -n "$p" ]] && kill -0 "$p" 2>/dev/null && ps -o args= -p "$p" 2>/dev/null | grep -q "src/server/main.ts"; then echo "$p"; fi
 }
 
 answering() {
@@ -69,12 +70,12 @@ stop() {
     rm -f "$pidfile"
     return 0
   fi
-  kill -TERM -- "-$p" 2>/dev/null || kill -TERM "$p"
+  kill -TERM -- "-$p" 2>/dev/null || kill -TERM "$p" 2>/dev/null || true
   for _ in $(seq 1 20); do
     kill -0 "$p" 2>/dev/null || break
     sleep 0.25
   done
-  if kill -0 "$p" 2>/dev/null; then kill -KILL -- "-$p" 2>/dev/null || kill -KILL "$p"; fi
+  if kill -0 "$p" 2>/dev/null; then kill -KILL -- "-$p" 2>/dev/null || kill -KILL "$p" 2>/dev/null || true; fi
   rm -f "$pidfile"
   echo "Session Factory stopped"
 }
