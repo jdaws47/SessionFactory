@@ -2,6 +2,7 @@ import '@xterm/xterm/css/xterm.css';
 import type { FactoryState } from '../src/shared/types';
 import { subscribe } from './api';
 import { AREAS, H, HOPPER, inRect, type Point, W } from './layout';
+import { CatchUp } from './catchup';
 import { Scene } from './scene';
 import { Ui } from './ui';
 
@@ -59,10 +60,14 @@ canvas.addEventListener('click', (e) => {
 });
 
 let last = performance.now();
+
+const catchUp = new CatchUp();
+document.addEventListener('visibilitychange', () => (document.hidden ? catchUp.hidden(performance.now()) : catchUp.shown(performance.now())));
 function frame(t: number): void {
   const dt = Math.min(0.1, (t - last) / 1000);
   last = t;
   scene.update(dt);
+  catchUp.run((step) => scene.update(step));
   scene.draw(ctx, t, { hover, selected: ui.selectedId, terminals: !!state?.features.terminals, pixelRatio });
   requestAnimationFrame(frame);
 }
