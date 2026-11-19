@@ -215,6 +215,31 @@ describe('Jira status on archived crates', () => {
     expect(reg.get(id)?.archived).toBe(true);
   });
 
+  it('a ticket finished after archiving is the normal flow, not a return', () => {
+    reg.ingest(ev({ kind: 'start', sessionId: 'a', title: 'TF-3' }));
+    const id = reg.all()[0].id;
+    reg.setJira(id, { status: 'Code Review', resolved: false }, 1);
+    reg.archive(id, 2);
+    reg.setJira(id, { status: 'Done', resolved: true }, 3);
+    expect(reg.get(id)?.returned).toBeUndefined();
+    // ...and Done is the new baseline: reopening it afterwards is a return.
+    reg.setJira(id, { status: 'Reopened', resolved: false }, 4);
+    expect(reg.get(id)?.returned?.reason).toBe('ticket moved to Reopened');
+  });
+
+  it('a dismissed return stays dismissed until the ticket moves again', () => {
+    reg.ingest(ev({ kind: 'start', sessionId: 'a', title: 'TF-4' }));
+    const id = reg.all()[0].id;
+    reg.setJira(id, { status: 'Done', resolved: true }, 1);
+    reg.archive(id, 2);
+    reg.setJira(id, { status: 'Reopened', resolved: false }, 3);
+    reg.dismissReturned(id);
+    reg.setJira(id, { status: 'Reopened', resolved: false }, 4);
+    expect(reg.get(id)?.returned).toBeUndefined();
+    reg.setJira(id, { status: 'In Progress', resolved: false }, 5);
+    expect(reg.get(id)?.returned?.reason).toBe('ticket moved to In Progress');
+  });
+
   it('uses the first status seen after archiving as the baseline when none was known', () => {
     reg.ingest(ev({ kind: 'prompt', sessionId: 'a', prompt: 'TF-2' }));
     const id = reg.all()[0].id;

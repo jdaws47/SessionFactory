@@ -207,8 +207,9 @@ export class Registry {
     });
   }
 
+  /** Clears the "returned" marker; the ticket's current status becomes the baseline, so only a further move re-marks it. */
   dismissReturned(id: string): void {
-    this.update(id, (c) => ({ ...c, returned: undefined }));
+    this.update(id, (c) => ({ ...c, returned: undefined, jira: c.jira ? { ...c.jira, statusAtArchive: c.jira.status } : c.jira }));
   }
 
   markReturned(id: string, reason: string, now: number): void {
@@ -224,7 +225,9 @@ export class Registry {
       const next: Crate = { ...c, jira: { ...c.jira, ...info, checkedAt: now } };
       if (c.archived && info.status) {
         const baseline = c.jira?.statusAtArchive;
-        if (!baseline) next.jira = { ...next.jira, statusAtArchive: info.status };
+        // Finishing the ticket after archiving is the normal flow: it just becomes the new baseline. Any other move
+        // (reopened, back in progress) means the work came back.
+        if (!baseline || (baseline !== info.status && info.resolved)) next.jira = { ...next.jira, statusAtArchive: info.status };
         else if (baseline !== info.status && !c.returned) next.returned = { reason: `ticket moved to ${info.status}`, at: now };
       }
       return next;
