@@ -38,6 +38,8 @@ export class AttachedTerminal {
     container.replaceChildren(host);
     this.xterm.open(host);
     this.fit.fit();
+    // Right-click already pastes; don't also open the browser's menu.
+    host.addEventListener('contextmenu', (e) => e.preventDefault());
 
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     this.ws = new WebSocket(`${proto}://${location.host}/ws/term/${encodeURIComponent(slot)}?cols=${this.xterm.cols}&rows=${this.xterm.rows}`);
