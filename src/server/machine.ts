@@ -8,28 +8,39 @@ export function isSyntheticPrompt(prompt: string | undefined): boolean {
   return !!prompt && /^\s*<[a-z][\w-]*[\s>]/.test(prompt);
 }
 
-/** Ways a closing paragraph waits for a go-ahead without a question mark. */
-const ASKING = /\b(let me know (which|what|when|whether|how)|tell me (when|which|what|whether)|say the word|say go|when you say|if (that|this) (works|sounds|matches)|unless you|your call|up to you|want me to|should i|shall i)\b/i;
+/** A closing paragraph that needs a choice or information from you before Claude can go on. */
+const DECISION =
+  /\b(if you (pick|choose|go with)|(how|what) (do|would|should) you want|how should (i|we)|which (one|option|approach|way|do you|would you|of)|pick (one|between|either)|choose (between|one)|let me know (which|what|whether|how)|tell me (which|what|whether)|i need (you|to know|your)|your call|up to you)\b/i;
+
+/** A closing paragraph only waiting for a go-ahead: the plan is set, you just say go (or do your part first). */
+const GO_AHEAD =
+  /\b(want me to|do you want me to|should i|shall i|ready to|say the word|say go|when you say|tell me when|once you|go ahead|good to go|ok(ay)? to)\b/i;
 
 /**
- * Whether Claude's last message ends by asking you something: its final paragraph has a question or waits for a
- * go-ahead, or, when the final paragraph is a list of options, the paragraph just before it does. Code is ignored.
+ * Whether Claude's last message ends needing a decision or an answer from you, as opposed to being done or only
+ * waiting for a go-ahead. Looks at the final paragraph (and, when that is a list of options, the paragraph before
+ * it): a choice ("which…", "if you pick…", "I need…") or an open question counts; a yes/no go-ahead ("want me
+ * to…?", "say the word", "once you've created the branch, I'll start") does not. Code and quotes are ignored.
  */
 export function endsWithQuestion(message: string | undefined): boolean {
   if (!message) return false;
+  // Code, quoted text and blockquotes are things being cited, not Claude asking (e.g. a PR template's "How was it tested?").
   const blocks = message
     .replace(/```[\s\S]*?```/g, '')
+    .replace(/^\s*>.*$/gm, '')
+    .replace(/"[^"\n]*"|“[^”\n]*”/g, '""')
     .split(/\n\s*\n/)
     .map((b) => b.trim())
     .filter(Boolean);
   const last = blocks[blocks.length - 1];
   if (!last) return false;
   const isList = last.split('\n').every((line) => /^\s*([-*+]|\d+[.)])\s/.test(line));
-  const tail = isList ? blocks.slice(-2) : [last];
-  return tail.some((b) => {
-    const text = b.replace(/`[^`\n]*`/g, '');
-    return /\?(\s|[*_)"'\]]|$)/.test(text) || ASKING.test(text);
-  });
+  const text = (isList ? blocks.slice(-2) : [last]).join('\n').replace(/`[^`\n]*`/g, '');
+  if (DECISION.test(text)) return true;
+  // Judge each question on its own: one offering alternatives ("…, or should I create one?"), or any question that
+  // isn't a yes/no go-ahead, needs you; a go-ahead question alone ("Want me to start?") doesn't.
+  const questions = text.match(/[^.?!\n]*\?(?=\s|[*_)"'\]]|$)/g) ?? [];
+  return questions.some((q) => /\b(or|which)\b/i.test(q) || !GO_AHEAD.test(q));
 }
 
 const INPUT_NOTIFICATIONS = new Set(['elicitation_dialog', 'elicitation_url_dialog', 'agent_needs_input']);

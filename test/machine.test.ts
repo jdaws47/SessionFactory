@@ -64,12 +64,42 @@ describe('zone state machine', () => {
     expect(done.waitingOn).toBeUndefined();
   });
 
-  it('a turn that ends by asking you something stays jammed in its machine until you answer', () => {
-    const asked = run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', lastMessage: 'I found two fixes.\n\nWant me to make it?' });
+  it('a turn that ends needing a decision or an answer from you stays jammed in its machine until you reply', () => {
+    const decide = 'I found two fixes.\n\nWhich one do you want, the cache or the index?';
+    const asked = run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', lastMessage: decide });
     expect(asked).toMatchObject({ zone: 'alert', alertReason: 'asked a question' });
     // Still waiting after Claude Code's idle reminder; answering sends it back to work.
-    expect(run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', lastMessage: 'Should I?' }, { kind: 'notify', notificationType: 'idle_prompt' }).zone).toBe('alert');
-    expect(run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', lastMessage: 'Should I?' }, { kind: 'prompt', prompt: 'yes' }).zone).toBe('working');
+    expect(run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', lastMessage: decide }, { kind: 'notify', notificationType: 'idle_prompt' }).zone).toBe('alert');
+    expect(run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', lastMessage: decide }, { kind: 'prompt', prompt: 'the cache' }).zone).toBe('working');
+  });
+
+  it('decisions and open questions jam; a plan only waiting for your go-ahead goes to the dock', () => {
+    const zoneAfter = (lastMessage: string) => run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', lastMessage }).zone;
+    for (const decision of [
+      '## Decision 1\n\n| A | B |\n\nIf you pick A, I\'ll start by checking whether ready_for_qc sessions come through dicom-pipeline.',
+      'Not a decision, but blocking: I need the step order. Does any algorithms-runner step run after DTA?',
+      "Two ways to do it.\n\nLet me know which you'd prefer.",
+      'Before I write any code: is there a Jira ticket for this, or should I create one (Bug or Dev Bug)?',
+      "How do you want the services' tests run?",
+      'Should I build the recycle version? And is 30 minutes the right idle threshold?',
+      'Should I implement the per-PR comment, and which flag option do you want?',
+    ]) {
+      expect(zoneAfter(decision), decision).toBe('alert');
+    }
+    for (const goAhead of [
+      "Once the other session is done with cerebrum and you've created the TF-1198 branch, I'll start with the tests.",
+      'I found two fixes.\n\nWant me to make it?',
+      'Plan is above. Should I go ahead?',
+      "Tell me when the branch is ready and I'll start.",
+      "Say the word and I'll apply it.",
+      'Ready to implement the resolvers when you say go.',
+      'That shows the wait dropped. If you want the actual numbers, I can pull them from the logs.',
+      'I\'ve checked the box on PR #290. The "How was it tested?" section already says that, so reviewers will know.',
+      'Done. The template asks “Any breaking changes?” and I answered no.',
+      '> Should we keep the old flag?\n\nI kept it, as the review asked.',
+    ]) {
+      expect(zoneAfter(goAhead), goAhead).toBe('dock');
+    }
   });
 
   it('a question followed by its options still counts; a question earlier in the message does not', () => {
@@ -80,9 +110,6 @@ describe('zone state machine', () => {
       { kind: 'stop', lastMessage: 'Why did it lap?\n\nThe reroute waited for the dock turn-off.\n\nFixed, and all 118 tests pass.\n\nReload to see it.' },
     );
     expect(settled.zone).toBe('dock');
-    for (const waiting of ['Want me to pull those rows? Or I can write the tests first.', 'Tell me when the branch is ready and I\'ll start.', 'Say the word and I\'ll apply it.']) {
-      expect(run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', lastMessage: `Here is the plan.\n\n${waiting}` }).zone).toBe('alert');
-    }
     // An open invitation to report back isn't waiting on you.
     const invited = run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', lastMessage: "Committed and built; reload to see it. I haven't seen it on screen, so tell me if the yellow is hard to read against the platform." });
     expect(invited.zone).toBe('dock');
