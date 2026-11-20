@@ -3,6 +3,7 @@ import { LOOP, NET } from '../web/belts';
 import { Scene, type Sprite } from '../web/scene';
 import { WAREHOUSE_X } from '../web/warehouse';
 import type { CrateView } from '../src/shared/types';
+import { serve } from './helpers';
 
 function crate(id: string, zone: CrateView['zone'], zoneSince: number): CrateView {
   return { id, sessionIds: [id], cwd: '/cr', repo: 'cr', label: id, labelSource: 'auto', zone, zoneSince, turns: 2, startedAt: zoneSince, updatedAt: zoneSince, archived: false, archiveCount: 0, reactivationCount: 0 };
@@ -25,14 +26,14 @@ describe('dock departures while a crate is still arriving', () => {
     const scene = new Scene();
     const a = crate('A', 'dock', 100);
     let x = crate('X', 'working', 200);
-    scene.setCrates([a, x], 1000);
+    serve(scene, [a, x], 1000);
     x = { ...x, zone: 'dock', zoneSince: 300 };
-    scene.setCrates([a, x], 1100);
+    serve(scene, [a, x], 1100);
     step(scene, 0.5);
     expect(usesDockBelt(sprite(scene, 'X'))).toBe(true);
 
     x = { ...x, zone: 'working', zoneSince: 400 };
-    scene.setCrates([a, x], 1200);
+    serve(scene, [a, x], 1200);
     expect(recycles(sprite(scene, 'A'))).toBe(false);
     expect(usesDockBelt(sprite(scene, 'X'))).toBe(false);
   });
@@ -41,14 +42,14 @@ describe('dock departures while a crate is still arriving', () => {
     const scene = new Scene();
     const a = crate('A', 'dock', 100);
     let x = crate('X', 'working', 200);
-    scene.setCrates([a, x], 1000);
+    serve(scene, [a, x], 1000);
     x = { ...x, zone: 'dock', zoneSince: 300 };
-    scene.setCrates([a, x], 1100);
+    serve(scene, [a, x], 1100);
     step(scene, 60, () => sprite(scene, 'X').path[0]?.track === NET.dock.track);
     expect(sprite(scene, 'X').path[0]?.track).toBe(NET.dock.track);
 
     x = { ...x, zone: 'working', zoneSince: 400 };
-    scene.setCrates([a, x], 1200);
+    serve(scene, [a, x], 1200);
     expect(recycles(sprite(scene, 'A'))).toBe(false);
 
     step(scene, 60, () => recycles(sprite(scene, 'A')));
@@ -62,14 +63,14 @@ describe('no teleporting', () => {
   it('a crate going round the dock recycle loop that is sent elsewhere finishes the loop first', () => {
     const scene = new Scene();
     let crates = [crate('A', 'dock', 100), crate('B', 'dock', 200), crate('C', 'dock', 300)];
-    scene.setCrates(crates, 1000);
+    serve(scene, crates, 1000);
     crates = crates.map((c) => (c.id === 'B' ? { ...c, zone: 'working', zoneSince: 400 } : c));
-    scene.setCrates(crates, 1100);
+    serve(scene, crates, 1100);
     step(scene, 60, () => sprite(scene, 'A').path[0]?.track === NET.dock.recycle!.track);
     expect(sprite(scene, 'A').path[0]?.track).toBe(NET.dock.recycle!.track);
     let { x, y } = sprite(scene, 'A');
     crates = crates.map((c) => (c.id === 'A' ? { ...c, zone: 'storage', zoneSince: 500 } : c));
-    scene.setCrates(crates, 1200);
+    serve(scene, crates, 1200);
     let worst = 0;
     for (let f = 0; f < 60 * 60; f++) {
       scene.update(1 / 60);
@@ -85,9 +86,9 @@ describe('dock order', () => {
   it('when a middle crate leaves, the queue keeps its order (everyone circulates, nobody overtakes)', () => {
     const scene = new Scene();
     let crates = [crate('A', 'dock', 100), crate('B', 'dock', 200), crate('C', 'dock', 300)];
-    scene.setCrates(crates, 1000);
+    serve(scene, crates, 1000);
     crates = crates.map((c) => (c.id === 'B' ? { ...c, zone: 'working', zoneSince: 400 } : c));
-    scene.setCrates(crates, 1100);
+    serve(scene, crates, 1100);
     step(scene, 60);
     const internals = scene.inspect();
     expect(internals.dockQueue).toEqual(['A', 'C']);
@@ -97,9 +98,9 @@ describe('dock order', () => {
   it('when the front crate leaves, the rest just move up', () => {
     const scene = new Scene();
     let crates = [crate('A', 'dock', 100), crate('B', 'dock', 200), crate('C', 'dock', 300)];
-    scene.setCrates(crates, 1000);
+    serve(scene, crates, 1000);
     crates = crates.map((c) => (c.id === 'A' ? { ...c, zone: 'working', zoneSince: 400 } : c));
-    scene.setCrates(crates, 1100);
+    serve(scene, crates, 1100);
     expect(recycles(sprite(scene, 'B'))).toBe(false);
     expect(recycles(sprite(scene, 'C'))).toBe(false);
   });
@@ -114,7 +115,7 @@ describe('crates never drive through each other', () => {
     const ids = Array.from({ length: count }, (_, i) => `c${i}`);
     let crates = ids.map((id, i) => crate(id, zones[i % zones.length], i));
     let clock = 1000;
-    scene.setCrates(crates, clock);
+    serve(scene, crates, clock);
     const internals = scene.inspect();
     let worst = 0;
     let worstPair = '';
@@ -128,7 +129,7 @@ describe('crates never drive through each other', () => {
         const pick = ids[Math.floor(rnd() * ids.length)];
         clock += 1000;
         crates = crates.map((c) => (c.id === pick ? { ...c, zone: zones[Math.floor(rnd() * zones.length)], zoneSince: clock } : c));
-        scene.setCrates(crates, clock);
+        serve(scene, crates, clock);
       }
       scene.update(1 / 60);
       // Nothing ever jumps: a frame's move is at most the fastest belt/crane/train speed allows.
@@ -183,15 +184,15 @@ describe('rerouting on the loop', () => {
   it('a crate heading for the dock that ends before passing storage turns off there instead of lapping', () => {
     const scene = new Scene();
     const c = crate('a', 'working', 1);
-    scene.setCrates([c], 1000);
+    serve(scene, [c], 1000);
     step(scene, 20);
-    scene.setCrates([{ ...c, zone: 'dock', zoneSince: 2 }], 2000);
+    serve(scene, [{ ...c, zone: 'dock', zoneSince: 2 }], 2000);
     const ahead = (target: number) => (target - LOOP.project(sprite(scene, 'a')) + LOOP.total) % LOOP.total;
     step(scene, 60, () => sprite(scene, 'a').path[0]?.track === LOOP && ahead(NET.storage.entryLoopS) > 40 && ahead(NET.storage.entryLoopS) < ahead(NET.dock.entryLoopS));
     expect(sprite(scene, 'a').path[0]?.track).toBe(LOOP);
     const toStorage = ahead(NET.storage.entryLoopS);
 
-    scene.setCrates([{ ...c, zone: 'storage', zoneSince: 3 }], 3000);
+    serve(scene, [{ ...c, zone: 'storage', zoneSince: 3 }], 3000);
     const s = sprite(scene, 'a');
     expect(usesDockBelt(s)).toBe(false);
     const pts = [{ x: s.x, y: s.y }, ...route(s)] as { x: number; y: number }[];
@@ -207,7 +208,7 @@ describe('cranes set crates down where they stay', () => {
     const cap = NET.storage.slots.length;
     const full = Array.from({ length: cap }, (_, i) => crate(`s${i}`, 'storage', i));
     const movers = ['A', 'B', 'C'].map((id, i) => crate(id, 'dock', 10 + i));
-    scene.setCrates([...full, ...movers], 1000);
+    serve(scene, [...full, ...movers], 1000);
     step(scene, 10);
     const drawn = new Map<string, { x: number; y: number; resting: boolean }>();
     let worst = 0;
@@ -229,10 +230,10 @@ describe('cranes set crates down where they stay', () => {
     let now = movers;
     for (const [i, c] of movers.entries()) {
       now = now.map((m) => (m.id === c.id ? { ...m, zone: 'storage' as const, zoneSince: 100 + i } : m));
-      scene.setCrates([...full, ...now], 2000 + i);
+      serve(scene, [...full, ...now], 2000 + i);
       watch(40);
     }
-    scene.setCrates([...full, ...now.map((m, i) => (i > 0 ? { ...m, archived: true, archivedAt: 3000 + i } : m))], 3000);
+    serve(scene, [...full, ...now.map((m, i) => (i > 0 ? { ...m, archived: true, archivedAt: 3000 + i } : m))], 3000);
     watch(90);
     expect([...internals.sprites.values()].filter((s) => s.phase === 'cargo' || s.phase === 'yard').length).toBe(2);
     expect(worst).toBeLessThan(0.5);
@@ -244,12 +245,12 @@ describe('layout bookkeeping', () => {
     const scene = new Scene();
     const a = crate('A', 'dock', 1);
     const x = crate('X', 'working', 2);
-    scene.setCrates([a, x], 1000);
+    serve(scene, [a, x], 1000);
     step(scene, 5);
-    scene.setCrates([a, { ...x, zone: 'dock', zoneSince: 3 }], 2000);
+    serve(scene, [a, { ...x, zone: 'dock', zoneSince: 3 }], 2000);
     step(scene, 20, () => sprite(scene, 'X').path[0]?.track === NET.dock.track);
-    scene.setCrates([a, { ...x, zone: 'working', zoneSince: 4 }], 3000);
-    scene.setCrates([a, { ...x, zone: 'working', zoneSince: 4, archived: true, archivedAt: 5 }], 4000);
+    serve(scene, [a, { ...x, zone: 'working', zoneSince: 4 }], 3000);
+    serve(scene, [a, { ...x, zone: 'working', zoneSince: 4, archived: true, archivedAt: 5 }], 4000);
     step(scene, 120);
     const relayout = vi.spyOn(scene as never as { relayout(): void }, 'relayout');
     step(scene, 2);
@@ -264,14 +265,14 @@ describe('crates leaving mid-job', () => {
     const scene = new Scene();
     const a = crate('A', 'storage', 1);
     const b = crate('B', 'storage', 2);
-    scene.setCrates([a, b], 1000);
+    serve(scene, [a, b], 1000);
     step(scene, 3);
-    scene.setCrates([{ ...a, archived: true, archivedAt: 5 }, b], 2000);
+    serve(scene, [{ ...a, archived: true, archivedAt: 5 }, b], 2000);
     step(scene, 60, () => inside(scene).cranes.freight.holding === 'A');
     expect(inside(scene).cranes.freight.holding).toBe('A');
-    scene.setCrates([a, b], 3000);
+    serve(scene, [a, b], 3000);
     step(scene, 60);
-    scene.setCrates([a, { ...b, archived: true, archivedAt: 6 }], 4000);
+    serve(scene, [a, { ...b, archived: true, archivedAt: 6 }], 4000);
     step(scene, 60, () => inside(scene).sprites.get('B')!.wagonSlot !== undefined);
     expect(inside(scene).sprites.get('B')!.wagonSlot).toBe(0);
   });
@@ -280,13 +281,13 @@ describe('crates leaving mid-job', () => {
     const scene = new Scene();
     const a = { ...crate('A', 'storage', 1), archived: true, archivedAt: 5 };
     const b = crate('B', 'storage', 2);
-    scene.setCrates([crate('A', 'storage', 1), b], 1000);
+    serve(scene, [crate('A', 'storage', 1), b], 1000);
     step(scene, 3);
-    scene.setCrates([a, b], 2000);
+    serve(scene, [a, b], 2000);
     step(scene, 120, () => inside(scene).gantryJobs.has('A') && inside(scene).gantry.holding !== 'A');
     expect(inside(scene).gantryJobs.has('A')).toBe(true);
-    scene.setCrates([b], 3000);
-    scene.setCrates([{ ...b, archived: true, archivedAt: 6 }], 3001);
+    serve(scene, [b], 3000);
+    serve(scene, [{ ...b, archived: true, archivedAt: 6 }], 3001);
     step(scene, 300, () => inside(scene).sprites.get('B')!.phase === 'yard');
     expect(inside(scene).sprites.get('B')!.phase).toBe('yard');
   });
@@ -305,11 +306,11 @@ describe('cranes never deadlock', () => {
       const scene = new Scene();
       const a = crate('A', 'storage', 1);
       const b = crate('B', 'working', 2);
-      scene.setCrates([a, b], 1000);
+      serve(scene, [a, b], 1000);
       step(scene, 3);
-      scene.setCrates([a, { ...b, zone: 'storage', zoneSince: 3 }], 2000);
+      serve(scene, [a, { ...b, zone: 'storage', zoneSince: 3 }], 2000);
       step(scene, delay);
-      scene.setCrates([{ ...a, zone: 'working', zoneSince: 4 }, { ...b, zone: 'storage', zoneSince: 3 }], 3000);
+      serve(scene, [{ ...a, zone: 'working', zoneSince: 4 }, { ...b, zone: 'storage', zoneSince: 3 }], 3000);
       step(scene, 120);
       expect([moving(scene, 'A'), moving(scene, 'B')], `delay ${delay}`).toEqual([false, false]);
     }
@@ -320,11 +321,11 @@ describe('cranes never deadlock', () => {
       const scene = new Scene();
       const a = crate('A', zone, 1);
       const b = { ...crate('B', 'storage', 2), archived: true, archivedAt: 5 };
-      scene.setCrates([a, b], 1000);
+      serve(scene, [a, b], 1000);
       step(scene, 3);
-      scene.setCrates([a, { ...b, archived: false }], 2000);
+      serve(scene, [a, { ...b, archived: false }], 2000);
       step(scene, delay);
-      scene.setCrates([{ ...a, archived: true, archivedAt: 6 }, { ...b, archived: false }], 3000);
+      serve(scene, [{ ...a, archived: true, archivedAt: 6 }, { ...b, archived: false }], 3000);
       step(scene, 300);
       expect(phaseOf(scene, 'A'), `${zone} ${delay}`).toBe('yard');
       expect([phaseOf(scene, 'B'), moving(scene, 'B')], `${zone} ${delay}`).toEqual(['floor', false]);
@@ -340,9 +341,9 @@ describe('piles', () => {
     const cap = NET.dock.slots.length;
     const queued = Array.from({ length: cap }, (_, i) => crate(`q${i}`, 'dock', i));
     const late = crate('late', 'working', 1);
-    scene.setCrates([...queued, late], 1000);
+    serve(scene, [...queued, late], 1000);
     step(scene, 5);
-    scene.setCrates([...queued, { ...late, zone: 'dock', zoneSince: 50 }], 2000);
+    serve(scene, [...queued, { ...late, zone: 'dock', zoneSince: 50 }], 2000);
     const view = scene.inspect();
     const bottom = view.sprites.get(`q${cap - 1}`)!;
     expect(view.covered(bottom)).toBe(false);
@@ -356,13 +357,13 @@ describe('piles', () => {
     const full = Array.from({ length: cap }, (_, i) => crate(`s${i}`, 'storage', i));
     const first = crate('first', 'dock', 1);
     const last = crate('last', 'dock', 1);
-    scene.setCrates([...full, first, last], 1000);
+    serve(scene, [...full, first, last], 1000);
     const { sprites } = internals(scene);
     const resting = () => [...sprites.values()].every((s) => s.settled !== undefined);
     // "first" is placed on the pile first, even though its session's timestamp is the newer one.
-    scene.setCrates([...full, { ...first, zone: 'storage', zoneSince: 60 }, last], 2000);
+    serve(scene, [...full, { ...first, zone: 'storage', zoneSince: 60 }, last], 2000);
     step(scene, 120, resting);
-    scene.setCrates([...full, { ...first, zone: 'storage', zoneSince: 60 }, { ...last, zone: 'storage', zoneSince: 10 }], 3000);
+    serve(scene, [...full, { ...first, zone: 'storage', zoneSince: 60 }, { ...last, zone: 'storage', zoneSince: 10 }], 3000);
     step(scene, 120, resting);
     expect(sprites.get('last')!.pileRank).toBe(0);
     const inFront = () => {
@@ -379,7 +380,7 @@ describe('piles', () => {
     const scene = new Scene();
     const cap = NET.storage.slots.length;
     const crates = Array.from({ length: cap + 2 }, (_, i) => crate(`c${i}`, 'storage', 100 + i));
-    scene.setCrates(crates, 1000);
+    serve(scene, crates, 1000);
     const pile = [`c${cap - 1}`, `c${cap}`, `c${cap + 1}`];
     const { sprites } = internals(scene);
     expect(new Set(pile.map((id) => sprites.get(id)!.at.slot)).size).toBe(1);
@@ -392,7 +393,7 @@ describe('piles', () => {
     expect(heights[2]).toBeLessThan(heights[1]);
 
     // A spot frees up: the top crate (newest) moves into it, the older ones stay put.
-    scene.setCrates(crates.filter((c) => c.id !== 'c0'), 2000);
+    serve(scene, crates.filter((c) => c.id !== 'c0'), 2000);
     expect(sprites.get(`c${cap + 1}`)!.at.slot).toBe(0);
     expect(sprites.get(`c${cap}`)!.at.slot).toBe(cap - 1);
     expect(sprites.get(`c${cap - 1}`)!.at.slot).toBe(cap - 1);
@@ -406,9 +407,9 @@ describe('freight train and warehouse', () => {
     const scene = new Scene();
     const a = crate('A', 'dock', 100);
     const b = crate('B', 'storage', 100);
-    scene.setCrates([a, b], 1000);
+    serve(scene, [a, b], 1000);
     step(scene, 10);
-    scene.setCrates([{ ...a, archived: true, archivedAt: 2000 }, { ...b, archived: true, archivedAt: 2001 }], 2000);
+    serve(scene, [{ ...a, archived: true, archivedAt: 2000 }, { ...b, archived: true, archivedAt: 2001 }], 2000);
     step(scene, 120, () => scene.train.cargo.length === 2);
     const [first, last] = scene.train.cargo;
     expect(st(scene, last).y).toBeLessThan(st(scene, first).y);
@@ -428,9 +429,9 @@ describe('freight train and warehouse', () => {
     const scene = new Scene();
     const a = { ...crate('A', 'storage', 1), archived: true, archivedAt: 5 };
     const b = { ...crate('B', 'storage', 2), archived: true, archivedAt: 6 };
-    scene.setCrates([a, b], 1000);
+    serve(scene, [a, b], 1000);
     scene.panTo('warehouse');
-    scene.setCrates([{ ...a, archived: false }, { ...b, archived: false }], 2000);
+    serve(scene, [{ ...a, archived: false }, { ...b, archived: false }], 2000);
     step(scene, 240, () => scene.train.cargo.length === 2 && scene.train.heading < 0);
     const loaded = [...scene.train.cargo];
     expect(loaded).toHaveLength(2);
@@ -447,9 +448,9 @@ describe('freight train and warehouse', () => {
   it('archived crates ride the train to the warehouse and get stacked; bringing one back reverses the trip', () => {
     const scene = new Scene();
     let a = crate('A', 'dock', 100);
-    scene.setCrates([a], 1000);
+    serve(scene, [a], 1000);
     a = { ...a, archived: true, archivedAt: 2000, zone: 'storage' };
-    scene.setCrates([a], 2000);
+    serve(scene, [a], 2000);
 
     step(scene, 120, () => st(scene, 'A').phase === 'yard');
     expect(st(scene, 'A').phase).toBe('yard');
@@ -457,7 +458,7 @@ describe('freight train and warehouse', () => {
     expect(st(scene, 'A').x).toBeGreaterThan(1600);
 
     a = { ...a, archived: false, zone: 'storage' };
-    scene.setCrates([a], 3000);
+    serve(scene, [a], 3000);
     step(scene, 180, () => {
       const s = st(scene, 'A');
       return s.phase === 'floor' && !s.path.length && !s.next && s.at.zone === 'storage';
@@ -470,7 +471,7 @@ describe('freight train and warehouse', () => {
 
   it('an idle train follows you to whichever page you are looking at', () => {
     const scene = new Scene();
-    scene.setCrates([], 1000);
+    serve(scene, [], 1000);
     scene.panTo('warehouse');
     step(scene, 30, () => scene.train.atWarehouse);
     expect(scene.train.atWarehouse).toBe(true);
@@ -487,9 +488,9 @@ describe('freight train and warehouse', () => {
       scene.panTo(where);
     };
     const old = { ...crate('old', 'storage', 1), archived: true, archivedAt: 5 };
-    scene.setCrates([old], 1000);
+    serve(scene, [old], 1000);
     scene.panTo('warehouse');
-    scene.setCrates([{ ...old, archived: false }], 2000);
+    serve(scene, [{ ...old, archived: false }], 2000);
     step(scene, 120, () => scene.train.heading < 0);
     expect(followed).toEqual([]);
     step(scene, 120, () => followed.length > 0);
@@ -505,9 +506,9 @@ describe('freight train and warehouse', () => {
     const followed: string[] = [];
     scene.onFollowTrain = (where) => followed.push(where);
     const c = crate('done', 'storage', 1);
-    scene.setCrates([c], 1000);
+    serve(scene, [c], 1000);
     step(scene, 60);
-    scene.setCrates([{ ...c, archived: true, archivedAt: 5 }], 2000);
+    serve(scene, [{ ...c, archived: true, archivedAt: 5 }], 2000);
     let left = false;
     step(scene, 120, () => (left ||= scene.train.moving && scene.train.heading > 0) && scene.train.atWarehouse);
     expect(left).toBe(true);
@@ -517,7 +518,7 @@ describe('freight train and warehouse', () => {
 
   it('crates archived before the page loaded are already on the stacks', () => {
     const scene = new Scene();
-    scene.setCrates([{ ...crate('old', 'storage', 1), archived: true, archivedAt: 5 }], 1000);
+    serve(scene, [{ ...crate('old', 'storage', 1), archived: true, archivedAt: 5 }], 1000);
     expect(st(scene, 'old').phase).toBe('yard');
     expect(st(scene, 'old').x).toBeGreaterThan(1600);
   });

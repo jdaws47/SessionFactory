@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { CATCH_UP_MAX, CatchUp } from '../web/catchup';
 import { Scene } from '../web/scene';
 import type { CrateView } from '../src/shared/types';
+import { serve } from './helpers';
 
 function crate(id: string, zone: CrateView['zone'], zoneSince: number): CrateView {
   return { id, sessionIds: [id], cwd: '/cr', repo: 'cr', label: id, labelSource: 'auto', zone, zoneSince, turns: 2, startedAt: zoneSince, updatedAt: zoneSince, archived: false, archiveCount: 0, reactivationCount: 0 };
@@ -48,12 +49,12 @@ describe('catching up after the tab was hidden', () => {
     const run = (withCatchUp: boolean) => {
       const scene = new Scene();
       const a = crate('A', 'storage', 1);
-      scene.setCrates([a], 1000);
+      serve(scene, [a], 1000);
       for (let i = 0; i < 60; i++) scene.update(1 / 60);
       const c = new CatchUp();
       c.hidden(0);
       // While hidden: the archive arrives, but no frames run.
-      scene.setCrates([{ ...a, archived: true, archivedAt: 2 }], 2000);
+      serve(scene, [{ ...a, archived: true, archivedAt: 2 }], 2000);
       c.shown(90_000);
       // Ten frames after coming back.
       for (let f = 0; f < 10; f++) {

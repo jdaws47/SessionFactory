@@ -67,11 +67,13 @@ export function stackSpot(index: number, level: number): Point {
 export class Stacks {
   readonly stacks: string[][] = Array.from({ length: SPOTS.length }, () => []);
 
-  place(id: string): { index: number; level: number } {
+  /** Puts a crate on the spot the server placed it on (or the first free one if it has no placement yet). */
+  place(id: string, spot?: number): { index: number; level: number } {
     const found = this.where(id);
-    if (found) return found;
-    let index = this.stacks.findIndex((s) => s.length < STACKS.levels);
-    if (index < 0) index = this.stacks.length - 1;
+    if (found && (spot === undefined || found.index === spot)) return found;
+    if (found) this.remove(id);
+    let index = spot ?? this.stacks.findIndex((s) => s.length < STACKS.levels);
+    if (index < 0 || index >= this.stacks.length) index = this.stacks.length - 1;
     this.stacks[index].push(id);
     return { index, level: this.stacks[index].length - 1 };
   }

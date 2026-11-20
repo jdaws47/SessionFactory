@@ -138,13 +138,6 @@ describe('belt network', () => {
 });
 
 describe('floor placement', () => {
-  it('sends a session back at intake after it has had turns (e.g. /clear) to the dock', async () => {
-    const { floorArea } = await import('../web/layout');
-    expect(floorArea('intake', 0)).toBe('intake');
-    expect(floorArea('intake', 3)).toBe('dock');
-    expect(floorArea('alert', 3)).toBe('working');
-  });
-
   it('storage crates are craned between the top belt and the yard', () => {
     const pts = travel({ zone: 'dock', slot: 0 }, { zone: 'storage', slot: 2 });
     const yard = NET.storage.slots[2];

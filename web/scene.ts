@@ -1,6 +1,6 @@
 import type { CrateView } from '../src/shared/types';
 import { ALL_TRACKS, BELT_SPEED, FREIGHT, fromHopper, fromLoop, onwardFrom, HOPPER_DROP, JUNCTIONS, LOOP, NET, type SlotRef, travel, type Waypoint, YARD } from './belts';
-import { AREAS, type Area, CRATE_H, CRATE_W, floorArea, HOPPER, MACHINE_H, MACHINE_W, type Point, TRAIN_Y, W } from './layout';
+import { AREAS, type Area, CRATE_H, CRATE_W, HOPPER, MACHINE_H, MACHINE_W, type Point, TRAIN_Y, W } from './layout';
 import { Crane } from './crane';
 import { Smoke } from './smoke';
 import { STACKS, Stacks, stackSpot, Train, TRAIN, WAREHOUSE_X, WORLD_W } from './warehouse';
@@ -53,7 +53,6 @@ export interface Sprite {
 const TRAIN_DWELL = 1;
 const PATIENCE = 2.5;
 
-const QUEUE_ZONES = new Set<Area>(['dock', 'intake']);
 
 export class Scene {
   private sprites = new Map<string, Sprite>();
@@ -113,10 +112,10 @@ export class Scene {
     const onFloor = new Set(crates.filter((c) => !c.archived).map((c) => c.id));
     for (const id of this.pendingLeave) if (!onFloor.has(id)) this.pendingLeave.delete(id);
     for (const c of crates) {
-      if (c.archived) continue;
-      let area = floorArea(c.zone, c.turns);
+      // Where a crate goes is the server's placement; archived crates go by train (see below).
+      if (c.archived || !c.placement || c.placement.area === 'warehouse') continue;
+      let area: Area = c.placement.area;
       const existing = this.sprites.get(c.id);
-      if (area === 'intake' && existing && existing.phase === 'floor' && existing.at.zone !== 'intake') area = 'dock';
       // Already riding the dock belt in: it keeps its place until it has settled, then leaves (see update()).
       const ridingIn = existing && existing.phase === 'floor' && existing.at.zone === 'dock' && existing.path[0]?.track === dockBelt;
       if (area !== 'dock' && ridingIn) {
@@ -162,7 +161,17 @@ export class Scene {
     const loopers = new Set(reordered.loopers);
 
     for (const [zone, list] of byZone) {
-      const assigned = QUEUE_ZONES.has(zone) ? this.queueSlots(zone, list) : this.stickySlots(zone, list);
+      if (zone !== 'dock') {
+        // Spot and pile order are the server's.
+        for (const c of list) {
+          const p = c.placement!;
+          this.place(c, { zone, slot: p.slot }, first, p.rank, p.pileSize, loopers.has(c.id));
+        }
+        continue;
+      }
+      // The dock still lays itself out in physical queue order on the page (the server's dock order takes over once
+      // belts carry crates physically): spots by place in the queue, its back pile by arrival.
+      const assigned = this.dockSlots(list);
       const piles = new Map<number, CrateView[]>();
       for (const c of list) piles.set(assigned.get(c.id)!, [...(piles.get(assigned.get(c.id)!) ?? []), c]);
       for (const [slot, pile] of piles) {
@@ -194,10 +203,16 @@ export class Scene {
     // Archived crates the floor has never seen (first load, history import) are already in the warehouse.
     for (const c of crates) {
       if (!c.archived || this.sprites.has(c.id)) continue;
-      const spot = this.stacks.place(c.id);
+      const spot = this.stacks.place(c.id, this.warehouseSpot(c.id));
       const pos = stackSpot(spot.index, spot.level);
       this.sprites.set(c.id, { ...pos, at: { zone: 'freight', slot: 0 }, currentTo: { zone: 'freight', slot: 0 }, path: [], phase: 'yard', pileRank: 0, pileSize: 1 });
     }
+  }
+
+  /** The warehouse spot the server placed an archived crate on. */
+  private warehouseSpot(id: string): number | undefined {
+    const p = this.crates.get(id)?.placement;
+    return p?.area === 'warehouse' ? p.slot : undefined;
   }
 
   /** Called when the view should follow the train (set by main so the UI updates too). */
@@ -241,47 +256,14 @@ export class Scene {
     return w ? [...this.stacks.stacks[w.index]].reverse() : [id];
   }
 
-  /**
-   * Dock and intake are queues on the belt itself: order decides position, the back of the queue piles up.
-   * The dock keeps its physical order, so crates that looped round to let one out stay at the back.
-   */
-  private queueSlots(zone: Area, list: CrateView[]): Map<string, number> {
-    const cap = NET[zone].slots.length;
-    if (zone !== 'dock') {
-      const ordered = [...list].sort((a, b) => a.startedAt - b.startedAt);
-      return new Map(ordered.map((c, i) => [c.id, Math.min(i, cap - 1)]));
-    }
-    // Crates in the queue take their place in it; crates still on their way head for the back for now.
+  /** Dock spots by place in the physical queue; crates still on their way head for the back for now. */
+  private dockSlots(list: CrateView[]): Map<string, number> {
+    const cap = NET.dock.slots.length;
     const rank = new Map(this.dockQueue.map((id, i) => [id, i]));
     const back = Math.min(this.dockQueue.length, cap - 1);
     return new Map(list.map((c) => [c.id, rank.has(c.id) ? Math.min(rank.get(c.id)!, cap - 1) : back]));
   }
 
-  /** Machines, alert spots and storage spots keep their crate until it leaves; extras pile on the last spot. */
-  private stickySlots(zone: Area, list: CrateView[]): Map<string, number> {
-    const cap = NET[zone].slots.length;
-    const used = new Set<number>();
-    const out = new Map<string, number>();
-    const rest: CrateView[] = [];
-    for (const c of [...list].sort((a, b) => a.zoneSince - b.zoneSince)) {
-      const s = this.sprites.get(c.id);
-      // The bottom of each pile (or a crate alone in its spot) keeps it; crates piled on top are what move.
-      if (s && s.phase === 'floor' && s.at.zone === zone && !used.has(s.at.slot) && s.pileRank === s.pileSize - 1) {
-        used.add(s.at.slot);
-        out.set(c.id, s.at.slot);
-      } else rest.push(c);
-    }
-    // Last in, first out: crates already piled here take free spots newest (top) first; arrivals follow in order.
-    const piled = (c: CrateView) => this.sprites.get(c.id)?.at.zone === zone && this.sprites.get(c.id)!.phase === 'floor';
-    for (const c of [...rest.filter(piled).reverse(), ...rest.filter((c) => !piled(c))]) {
-      let slot = 0;
-      while (slot < cap && used.has(slot)) slot++;
-      if (slot >= cap) slot = cap - 1;
-      used.add(slot);
-      out.set(c.id, slot);
-    }
-    return out;
-  }
 
   private place(c: CrateView, to: SlotRef, instant: boolean, pileRank: number, pileSize: number, lap = false): void {
     let s = this.sprites.get(c.id);
@@ -568,7 +550,7 @@ export class Scene {
       if (!resting) s.settled = undefined;
       else if (s.settled === undefined) {
         s.settled = ++this.arrivals;
-        if (s.phase === 'floor') this.restack(s.at);
+        if (s.phase === 'floor' && s.at.zone === 'dock') this.restack(s.at);
       }
       if (s.phase === 'toFreight' && !s.path.length && !s.next && !this.heldBy(id) && this.train.atFactory) {
         // Lowered into the wagon: it is cargo now (and no longer part of any factory pile).
@@ -711,7 +693,7 @@ export class Scene {
       for (const id of [...train.cargo].reverse()) {
         const s = this.sprites.get(id)!;
         if (s.homeward || this.gantryJobs.has(id)) continue;
-        this.stacks.place(id);
+        this.stacks.place(id, this.warehouseSpot(id));
         this.gantryJobs.set(id, 'store');
         this.gantry.request(id, this.stacks.spotOf(id)!);
       }
