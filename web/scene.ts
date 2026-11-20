@@ -212,6 +212,7 @@ export class Scene {
       gantry: this.gantry,
       drawOrder: () => this.drawOrder(),
       pileOffset: (s: Sprite) => this.pileOffset(s),
+      covered: (s: Sprite) => this.covered(s),
     };
   }
   /** A recalled crate's train has left the warehouse while you watched; follow it once it crosses the page edge. */
@@ -784,6 +785,18 @@ export class Scene {
     return [...this.sprites.entries()].sort((a, b) => lifted(a) - lifted(b) || key(a) - key(b) || b[1].pileRank - a[1].pileRank);
   }
 
+  /** The other crates actually resting in this crate's pile spot (not ones still on their way to it). */
+  private restingPileMates(s: Sprite): Sprite[] {
+    return [...this.sprites.values()].filter(
+      (o) => o !== s && o.phase === 'floor' && o.at.zone === s.at.zone && o.at.slot === s.at.slot && !o.path.length && !o.next,
+    );
+  }
+
+  /** Buried: another crate already rests on top of it (a crate merely on its way to the pile doesn't count yet). */
+  private covered(s: Sprite): boolean {
+    return s.pileRank > 0 && this.restingPileMates(s).some((o) => o.pileRank < s.pileRank);
+  }
+
   /** How high in its pile a crate should sit, in levels (0 = on the floor). */
   private pileLevel(s: Sprite): number {
     const moving = s.path.length > 0 || !!s.next;
@@ -975,7 +988,7 @@ export class Scene {
     const cx = x + CRATE_W / 2;
     // Ended sessions look dimmed wherever their crate is: parked, on a belt, on a crane or on the train.
     const parked = c.zone === 'storage';
-    const buried = !moving && !away(s) && s.pileRank > 0;
+    const buried = !moving && !away(s) && this.covered(s);
 
     const holder = this.heldBy(c.id);
     const lifted = holder ? holder.lift : 0;
@@ -1050,14 +1063,15 @@ export class Scene {
     for (const [id, s] of this.drawOrder()) {
       const c = this.crates.get(id);
       const parked = !s.path.length && !s.next && !this.heldBy(id);
-      if (!c || s.phase !== 'floor' || (parked && s.pileRank > 0)) continue;
+      if (!c || s.phase !== 'floor' || (parked && this.covered(s))) continue;
       const top = this.pileOffset(s);
       const x = Math.round(top.x - CRATE_W / 2);
       const y = Math.round(top.y - CRATE_H / 2);
       const cx = x + CRATE_W / 2;
       ctx.textAlign = 'center';
-      if (parked && s.pileSize > 1) {
-        const label = `+${s.pileSize - 1}`;
+      const under = parked ? this.restingPileMates(s).filter((o) => o.pileRank > s.pileRank).length : 0;
+      if (under > 0) {
+        const label = `+${under}`;
         ctx.font = '800 10px system-ui, sans-serif';
         const w = ctx.measureText(label).width + 10;
         fillSquircle(ctx, x - 8, y - 8, w, 16, RADIUS.small, '#e5e7eb');

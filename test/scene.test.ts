@@ -335,6 +335,21 @@ describe('cranes never deadlock', () => {
 describe('piles', () => {
   const internals = (scene: Scene) => scene.inspect();
 
+  it('the crate underneath only looks buried once the new one has actually landed on it', () => {
+    const scene = new Scene();
+    const cap = NET.dock.slots.length;
+    const queued = Array.from({ length: cap }, (_, i) => crate(`q${i}`, 'dock', i));
+    const late = crate('late', 'working', 1);
+    scene.setCrates([...queued, late], 1000);
+    step(scene, 5);
+    scene.setCrates([...queued, { ...late, zone: 'dock', zoneSince: 50 }], 2000);
+    const view = scene.inspect();
+    const bottom = view.sprites.get(`q${cap - 1}`)!;
+    expect(view.covered(bottom)).toBe(false);
+    step(scene, 60, () => !view.sprites.get('late')!.path.length && !view.sprites.get('late')!.next);
+    expect(view.covered(bottom)).toBe(true);
+  });
+
   it('stack in the order crates are physically placed there, not by session timestamps', () => {
     const scene = new Scene();
     const cap = NET.storage.slots.length;
