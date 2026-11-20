@@ -34,6 +34,7 @@ function state(): FactoryState {
   return {
     now,
     crates: registry.view(now, terminals.liveSlots),
+    dockOrder: registry.dockOrder(),
     cleanRoot: CLEAN_ROOT,
     stats: { turnsToday: registry.turnsSince(new Date(now).setHours(0, 0, 0, 0)) },
     features: { terminals: terminalsAvailable, jira: jira.configured, jiraHost: jira.configured ? jira.host : undefined },

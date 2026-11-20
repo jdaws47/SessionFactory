@@ -56,6 +56,8 @@ export interface CrateView extends Crate {
 export interface FactoryState {
   now: number;
   crates: CrateView[];
+  /** The loading dock's queue, front first: crates waiting for you, longest-waiting first. The page lays the dock out in this order. */
+  dockOrder: string[];
   cleanRoot: string;
   features: { terminals: boolean; jira: boolean; jiraHost?: string };
   stats: { turnsToday: number };

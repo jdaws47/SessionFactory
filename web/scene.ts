@@ -68,6 +68,7 @@ export class Scene {
   private running = new Set<string>([sectionKey(LOOP, 0)]);
   /** The storage yard's crane; it carries crates between the belt and the yard and parks at home. */
   /** Physical order of crates on the dock belt, front first. */
+  /** Crates physically in the dock queue, front first in belt order. */
   private dockQueue: string[] = [];
   /** Crates going round the dock recycle loop: 'out' until they reach the recycle belt, then 'round'. */
   private recycling = new Map<string, 'out' | 'round'>();
@@ -619,7 +620,12 @@ export class Scene {
     let joined = false;
     for (const [id, s] of this.sprites) {
       const belt = s.path[0]?.track;
-      const lap = this.recycling.get(id);
+      let lap = this.recycling.get(id);
+      // Marked as going round, but a reroute took the recycle loop out of its route: it isn't going round any more.
+      if (lap === 'out' && ![...s.path, ...(s.next?.path ?? [])].some((w) => w.track === NET.dock.recycle?.track)) {
+        this.recycling.delete(id);
+        lap = undefined;
+      }
       if (lap === 'out' && belt === NET.dock.recycle?.track) this.recycling.set(id, 'round');
       const settledHere = !s.path.length && !s.next;
       if (lap === 'out' || s.phase !== 'floor' || s.at.zone !== 'dock' || !(belt === NET.dock.track || settledHere) || this.dockQueue.includes(id)) continue;

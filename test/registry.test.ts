@@ -202,6 +202,16 @@ describe('unlinking a Jira ticket', () => {
   });
 });
 
+describe('the dock order', () => {
+  it('is every crate waiting for you, longest-waiting first', () => {
+    reg.ingest(ev({ kind: 'stop', sessionId: 'late', at: 300 }));
+    reg.ingest(ev({ kind: 'stop', sessionId: 'early', at: 100 }));
+    reg.ingest(ev({ kind: 'prompt', sessionId: 'busy', prompt: 'x', at: 50 }));
+    const label = (id: string) => reg.get(id)!.sessionIds[0];
+    expect(reg.dockOrder().map(label)).toEqual(['early', 'late']);
+  });
+});
+
 describe('Jira status on archived crates', () => {
   it('a ticket that moves after archiving marks the crate returned, without unarchiving it', () => {
     reg.ingest(ev({ kind: 'start', sessionId: 'a', title: 'TF-1' }));

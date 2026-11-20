@@ -256,6 +256,14 @@ export class Registry {
     }
   }
 
+  /** The dock's queue, front first: crates waiting for your next prompt, longest-waiting first (the source of truth). */
+  dockOrder(): string[] {
+    return this.all()
+      .filter((c) => !c.archived && (c.zone === 'dock' || (c.zone === 'intake' && c.turns > 0)))
+      .sort((a, b) => a.zoneSince - b.zoneSince || a.id.localeCompare(b.id))
+      .map((c) => c.id);
+  }
+
   view(now: number, liveSlots: Set<string> = new Set()): CrateView[] {
     return this.all().map((c) => {
       let readyToShip: string | undefined;
