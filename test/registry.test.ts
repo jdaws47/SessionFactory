@@ -202,13 +202,16 @@ describe('unlinking a Jira ticket', () => {
   });
 });
 
-describe('the dock order', () => {
-  it('is every crate waiting for you, longest-waiting first', () => {
-    reg.ingest(ev({ kind: 'stop', sessionId: 'late', at: 300 }));
-    reg.ingest(ev({ kind: 'stop', sessionId: 'early', at: 100 }));
-    reg.ingest(ev({ kind: 'prompt', sessionId: 'busy', prompt: 'x', at: 50 }));
-    const label = (id: string) => reg.get(id)!.sessionIds[0];
-    expect(reg.dockOrder().map(label)).toEqual(['early', 'late']);
+describe('placements', () => {
+  it('every crate in the view carries its placement, kept with the crate so spots stay sticky across restarts', () => {
+    reg.ingest(ev({ kind: 'prompt', sessionId: 'a', prompt: 'x', at: 10 }));
+    reg.ingest(ev({ kind: 'prompt', sessionId: 'b', prompt: 'y', at: 20 }));
+    const first = reg.view(1000);
+    expect(first.map((c) => `${c.placement?.area}/${c.placement?.slot}`).sort()).toEqual(['working/0', 'working/1']);
+    reg.close();
+    const again = new Registry(FILE, CLEAN_ROOT);
+    expect(again.all().map((c) => c.placement?.slot).sort()).toEqual([0, 1]);
+    again.close();
   });
 });
 

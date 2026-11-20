@@ -1,6 +1,24 @@
 /** Where a crate sits on the factory floor. */
 export type Zone = 'intake' | 'working' | 'alert' | 'dock' | 'storage';
 
+/** Where the server puts a crate. The page only animates crates into their placements; it never chooses one. */
+export type PlacementArea = 'intake' | 'working' | 'dock' | 'storage' | 'warehouse';
+
+/** How many spots each area has. Extra crates pile on the area's last spot. */
+export const CAPACITY: Record<PlacementArea, number> = { intake: 1, working: 10, dock: 5, storage: 6, warehouse: 96 };
+
+export interface Placement {
+  area: PlacementArea;
+  /** Spot in the area: assembler, queue position (0 = front of the dock/intake), storage spot, warehouse spot. */
+  slot: number;
+  /** Place in the spot's pile, 0 = top (the crate put there last). */
+  rank: number;
+  /** How many crates share the spot. */
+  pileSize: number;
+  /** When the server put the crate on this spot: keeps spots sticky and orders piles. */
+  since: number;
+}
+
 export type LabelSource = 'auto' | 'jira' | 'manual';
 
 export interface JiraInfo {
@@ -14,6 +32,8 @@ export interface JiraInfo {
 export interface Crate {
   id: string;
   sessionIds: string[];
+  /** Where the server has placed the crate (see placement.ts); the page animates it there. */
+  placement?: Placement;
   /** Factory terminal slot (tmux session name) when the factory started this session. */
   slot?: string;
   pid?: number;
@@ -56,8 +76,6 @@ export interface CrateView extends Crate {
 export interface FactoryState {
   now: number;
   crates: CrateView[];
-  /** The loading dock's queue, front first: crates waiting for you, longest-waiting first. The page lays the dock out in this order. */
-  dockOrder: string[];
   cleanRoot: string;
   features: { terminals: boolean; jira: boolean; jiraHost?: string };
   stats: { turnsToday: number };
