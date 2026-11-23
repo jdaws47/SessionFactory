@@ -154,13 +154,16 @@ export function drawBelt(ctx: CanvasRenderingContext2D, track: Track, travelled:
   ctx.strokeStyle = C.section;
   ctx.lineWidth = 20;
   ctx.setLineDash([26, 4]);
+  // Each section's plates carry on the pattern from the start of the belt, so a belt whose sections have all run
+  // alike looks like one belt.
+  const starts = [0, ...track.splits];
   sectionPoints(track).forEach((pts, i) => {
-    ctx.lineDashOffset = -travelled(i);
+    ctx.lineDashOffset = starts[i] - travelled(i);
     strokePoints(ctx, pts);
   });
   ctx.setLineDash([]);
-  for (const split of track.splits) {
-    const p = track.at(split);
+  for (const joint of track.joints) {
+    const p = track.at(joint);
     ctx.save();
     ctx.translate(p.x, p.y);
     ctx.rotate(p.angle);

@@ -14,8 +14,10 @@ export interface Pose extends Point {
 export class Track {
   readonly len: number[] = [0];
   readonly total: number;
-  /** Distances where independent belt sections meet (accumulation joints). Empty = one section. */
+  /** Distances where independent belt sections meet. Empty = one section. */
   splits: number[] = [];
+  /** The section joints drawn as rollers (the dock's accumulation zones); the rest are too fine to draw. */
+  joints: number[] = [];
 
   constructor(
     readonly pts: Point[],
@@ -269,12 +271,12 @@ const DOCK_SPACING = 128;
  * The loading dock: in-leg down from the loop, a queue running left past the operator, out-leg back up.
  * A recycle loop splits off just past the front, runs back under the queue and merges in at the back, so
  * crates that must clear the way for a departure circulate inside the dock instead of lapping the main loop.
- * The queue is an accumulation conveyor (one section per spot).
+ * The queue is an accumulation conveyor: its rollers mark the zone of each spot.
  */
 function dockLine(): ZoneNet {
   const z = zone(bottomZoneTrack(DOCK_IN_X, DOCK_OUT_X, DOCK_Y), (t) => trackSlots(t, [0, 1, 2, 3, 4].map((i) => ({ x: DOCK_FRONT_X + i * DOCK_SPACING, y: DOCK_Y }))));
   const spots = z.slots.map((q) => (q.kind === 'track' ? q.s : 0)).sort((a, b) => a - b);
-  z.track.splits = spots.slice(1).map((v, i) => (v + spots[i]) / 2);
+  z.track.joints = spots.slice(1).map((v, i) => (v + spots[i]) / 2);
   const downX = DOCK_OUT_X + 28;
   // The recycle belt climbs back up to the in-leg's corner from below, so the two legs meet head-on at one
   // merger instead of running side by side, and the merge sits right at the back of the queue.
@@ -310,9 +312,12 @@ export const YARD = {
   /** The yard belt's legs sit symmetrically about the yard centre (1093). */
   inX: 1193,
   outX: 993,
-  /** One transfer point, the middle of the belt through the yard: crates are picked up and set down here. */
-  pickup: { x: 1093, y: 582 },
-  drop: { x: 1093, y: 582 },
+  /**
+   * Two transfer points over the yard's columns: arriving crates stop at the pickup (upstream) to be lifted in;
+   * leaving crates are set down at the drop (downstream), so one coming in never stands where one going out lands.
+   */
+  pickup: { x: 1156, y: 582 },
+  drop: { x: 1030, y: 582 },
   columns: [1030, 1156],
   rows: [662, 740, 818],
   /** Rails stand outside the belt's legs, with clear space between them and any crate in the yard. */
@@ -349,6 +354,17 @@ export const ALL_TRACKS: Track[] = [
   ...Object.values(NET).map((z) => z.track),
   LOOP,
 ];
+
+/**
+ * Belts are made of short sections, each running only while it carries a moving crate, so a crate is stuck to its
+ * spot on the belt: when it stops, the belt under it stops. Sections are shorter than the closest two crates can
+ * be (one above the other on a vertical belt), so a crate never shares a section with one standing still.
+ */
+const SECTION = 20;
+for (const track of ALL_TRACKS) {
+  const n = Math.max(1, Math.round(track.total / SECTION));
+  track.splits = Array.from({ length: n - 1 }, (_, i) => (track.total * (i + 1)) / n);
+}
 
 /** Where zone belts split off and merge into the loop (drawn as splitter/merger blocks). */
 export const JUNCTIONS: Point[] = Object.values(NET).flatMap((z) => z.junctions);

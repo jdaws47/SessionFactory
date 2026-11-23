@@ -79,14 +79,10 @@ describe('belt network', () => {
     expect(toWork.some((p) => p.track === LOOP)).toBe(true);
   });
 
-  it('a crate joining the back of the dock queue never runs the sections the crates in front sit on', () => {
-    const dock = NET.dock.track;
-    const front = NET.dock.slots[0];
-    if (front.kind !== 'track') throw new Error('dock spots are on the belt');
-    const pts = travel({ zone: 'working', slot: 0 }, { zone: 'dock', slot: 2 });
-    const sections = new Set(pts.filter((p) => p.track === dock).map((p) => dock.sectionOf(dock.project(p))));
-    expect(sections.has(dock.sectionOf(front.s))).toBe(false);
-    expect(dock.splits.length).toBe(NET.dock.slots.length - 1);
+  it("the dock belt's rollers sit between its spots, one per gap", () => {
+    const spots = NET.dock.slots.map((q) => (q.kind === 'track' ? q.s : NaN)).sort((a, b) => a - b);
+    expect(NET.dock.track.joints).toHaveLength(spots.length - 1);
+    NET.dock.track.joints.forEach((j, i) => expect(j > spots[i] && j < spots[i + 1]).toBe(true));
   });
 
   it('a crate sent further back in the dock queue circulates on the dock recycle loop, not the main loop', () => {
@@ -238,7 +234,7 @@ describe('freight station layout', () => {
 });
 
 describe('storage yard layout', () => {
-  it('centres the yard on its belt, keeps spots between the rails and the rails clear of the belt legs', async () => {
+  it('centres the yard on its belt, keeps spots between the rails, the rails clear of the belt legs, and the transfer points a crate apart', async () => {
     const centre = (YARD.inX + YARD.outX) / 2;
     expect((YARD.columns[0] + YARD.columns[YARD.columns.length - 1]) / 2).toBe(centre);
     const { CRATE_W } = await import('../web/layout');
@@ -254,6 +250,9 @@ describe('storage yard layout', () => {
     for (const rail of [YARD.rails.left, YARD.rails.right]) {
       for (const leg of [YARD.inX, YARD.outX]) expect(Math.abs(rail - leg) - railHalfWidth - beltHalfWidth).toBeGreaterThanOrEqual(4);
     }
-    expect(YARD.pickup.x).toBe(centre);
+    // Arriving crates stop upstream, over one column; leaving ones are set down downstream, over the other, a crate
+    // apart, so one waiting to come in never stands where one going out is set down.
+    expect([YARD.pickup.x, YARD.drop.x]).toEqual([YARD.columns[YARD.columns.length - 1], YARD.columns[0]]);
+    expect(YARD.pickup.x - YARD.drop.x).toBeGreaterThanOrEqual(CRATE_W);
   });
 });

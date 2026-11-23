@@ -49,11 +49,6 @@ export class Crane {
     return this.holding ? 1 - this.claw : 0;
   }
 
-  /** Where the crane has promised to set crates down (current job first, then queued ones). */
-  get reserved(): { id: string; to: Point }[] {
-    return [...(this.job ? [this.job] : []), ...this.queue];
-  }
-
   get busy(): boolean {
     return this.phase !== 'idle';
   }
@@ -149,10 +144,17 @@ export class Crane {
     }
   }
 
-  /** Takes the oldest job whose set-down spot is free, so a crate waiting on the spot is collected first. */
+  /**
+   * Takes the oldest job whose set-down spot is free, so a crate waiting on the spot is collected first. With none
+   * free it stays put: picking a crate up with nowhere to put it down could only end in hovering over the spot.
+   */
   private startNext(crates: CraneCrates): void {
     const ready = this.queue.findIndex((j) => crates.free(j.to, j.id));
-    this.job = this.queue.splice(ready < 0 ? 0 : ready, 1)[0];
+    if (ready < 0) {
+      if (this.phase === 'raise') this.goHome();
+      return;
+    }
+    this.job = this.queue.splice(ready, 1)[0];
     this.phase = 'settle';
     this.timer = this.pause;
   }

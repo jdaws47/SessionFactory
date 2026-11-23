@@ -57,7 +57,10 @@ web/
   scene.ts            Crate simulation (belts, piles, cranes, train, warehouse) and the scene's own draw passes
   paint.ts            Stateless painting: palette, drawing helpers, scenery, belts, machines, cranes, operator
   belts.ts            One-way belt network: clockwise loop; one belt per zone (loop → zone → loop); every slot is on a
-                      zone belt (dock/intake queues) or has its own in/out branch (assemblers, alert, storage). travel() routes
+                      zone belt (dock/intake queues) or has its own in/out branch (assemblers, alert, storage). travel() routes.
+                      Belts are cut into short sections that only run while carrying a moving crate
+  cells.ts            Belt interlocking: belts as cells, which cells conflict (crates on them would touch) and which are
+                      safe to stop on. scene.ts claims cells for every move
   shapes.ts           Squircle helpers; the canvas never draws true circles or ovals
   terminal.ts         xterm.js terminal attached to /ws/term/:slot
   ui.ts               Top bar, crate window (terminal or info), new-session dialog, warehouse, returned inbox
@@ -67,6 +70,12 @@ web/
 Factory terminals: the server starts `tmux new-session -e SF_SLOT=<slot>` in clean-room and types `scrub-in; cd <clean-room> && claude`. Hooks carry `SF_SLOT`, so the session links to the crate pre-registered for that slot. The browser attaches through `/ws/term/:slot` (a node-pty running `tmux attach`).
 
 State flow: Claude hook → `hooks/emit-event` → `data/events/*.json` → `EventIngestor` → `Registry.ingest` → `applyEvent` → websocket broadcast → `Scene.setCrates`.
+
+Motion (belt-locked physics): a crate rides its belt and never slides over a moving one; the belt section under it
+runs exactly as far as it moves. A crate only moves into belt cells it holds, and it takes every cell up to the next
+place it can stop without being in anyone's way, or none (railway-style interlocking, `cells.ts`). Cranes claim the
+belt cell they set a crate down on, and only start a job they can finish. Nothing eases through or gives way on a
+timer: when crates gridlock, fix the rule or the layout that let them.
 
 Placement vs motion: the server decides where every crate goes (`placement.ts`, sent as `CrateView.placement`); the page only animates crates there and never picks a spot or an order. One exception remains until belts carry crates physically: the page still orders the loading dock by physical queue position.
 

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { LOOP, NET } from '../web/belts';
+import { LOOP, NET, type Track } from '../web/belts';
+import { CELLS } from '../web/cells';
 import { Scene, type Sprite } from '../web/scene';
 import { WAREHOUSE_X } from '../web/warehouse';
 import type { CrateView } from '../src/shared/types';
@@ -107,7 +108,13 @@ describe('dock order', () => {
 });
 
 describe('crates never drive through each other', () => {
-  function overlapTest(seed: number, count = 12, every = 70) {
+  /**
+   * A floor of `count` sessions with a random change every `every` frames for 50s, then time to settle. With
+   * `archive`, a tenth of the changes archive a crate or bring one back. Reports what never settled, overlaps
+   * between crates (other than piles), the biggest single-frame move, and slips: a crate standing still on a belt
+   * that moves under it, or a belt that moves a different distance from the crate riding it.
+   */
+  function overlapTest(seed: number, count = 12, every = 70, { archive = false, seconds = 90 } = {}) {
     let r = seed;
     const rnd = () => ((r = (r * 16807) % 2147483647) - 1) / 2147483646;
     const zones: CrateView['zone'][] = ['working', 'dock', 'dock', 'alert', 'storage'];
@@ -121,38 +128,48 @@ describe('crates never drive through each other', () => {
     let worstPair = '';
     let overlapFrames = 0;
     let worstJump = 0;
+    let slips = 0;
     const prev = new Map<string, { x: number; y: number }>();
-    // Pairs stacked in the same pile overlap by design until they have first moved apart.
+    // Pairs stacked in a pile overlap by design until they have first moved apart: crates on the same spot, and a
+    // crate landing on (or lifting off) a pile.
     const piled = new Set<string>();
-    for (let f = 0; f < 60 * 90; f++) {
+    const settled = (s: Sprite) => !s.path.length && !s.next;
+    const landing = (a: Sprite, b: Sprite) => settled(b) && a.currentTo.zone === b.at.zone && a.currentTo.slot === b.at.slot;
+    for (let f = 0; f < 60 * seconds; f++) {
       if (f < 60 * 50 && f % every === 0) {
         const pick = ids[Math.floor(rnd() * ids.length)];
         clock += 1000;
-        crates = crates.map((c) => (c.id === pick ? { ...c, zone: zones[Math.floor(rnd() * zones.length)], zoneSince: clock } : c));
+        const flip = archive && rnd() < 0.1;
+        crates = crates.map((c) =>
+          c.id !== pick ? c : flip ? { ...c, archived: !c.archived, archivedAt: clock } : { ...c, zone: zones[Math.floor(rnd() * zones.length)], zoneSince: clock },
+        );
         serve(scene, crates, clock);
       }
-      scene.update(1 / 60);
-      // Nothing ever jumps: a frame's move is at most the fastest belt/crane/train speed allows.
-      for (const [id, sp] of internals.sprites) {
-        const before = prev.get(id);
-        if (before) worstJump = Math.max(worstJump, Math.hypot(sp.x - before.x, sp.y - before.y));
-        prev.set(id, { x: sp.x, y: sp.y });
+      const under = new Map<string, { belt: [Track, number]; ran: number }>();
+      for (const id of internals.sprites.keys()) {
+        const belt = onBelt(internals, id);
+        if (belt) under.set(id, { belt, ran: internals.beltTravel(...belt) });
       }
-      const held = new Set(Object.values(internals.cranes).map((c) => c.holding));
-      const list = [...internals.sprites.entries()].filter(([id]) => !held.has(id));
+      scene.update(1 / 60);
+      const held = new Set([...Object.values(internals.cranes), internals.gantry].map((c) => c.holding));
+      const list = [...internals.sprites.entries()].filter(([id, s]) => !held.has(id) && s.phase !== 'cargo' && s.phase !== 'yard');
+      const touching = new Set<string>();
       for (let i = 0; i < list.length; i++) {
         for (let j = i + 1; j < list.length; j++) {
           const [ia, a] = list[i];
           const [ib, b] = list[j];
-          const settled = (s: Sprite) => !s.path.length && !s.next;
           const key = `${ia}/${ib}`;
           const ox = Math.max(0, 118 - Math.abs(a.x - b.x));
           const oy = Math.max(0, 56 - Math.abs(a.y - b.y));
           const o = (ox * oy) / (118 * 56);
-          const sameSpot = a.at.zone === b.at.zone && a.at.slot === b.at.slot;
-          if (sameSpot && (settled(a) || settled(b))) piled.add(key);
+          if (o > 0) [ia, ib].forEach((id) => touching.add(id));
+          const sameSpot = a.at.zone === b.at.zone && a.at.slot === b.at.slot && (settled(a) || settled(b));
+          const stacked = Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1;
+          if (sameSpot || stacked || landing(a, b) || landing(b, a)) piled.add(key);
           if (o === 0) piled.delete(key);
-          if (piled.has(key)) continue;
+          // Crates set down in the wagon sit in its pile.
+          const inWagon = (s: Sprite) => Math.abs(s.x - 1406) < 20 && Math.abs(s.y - 673) < 20;
+          if (piled.has(key) || (inWagon(a) && inWagon(b))) continue;
           if (o > 0.1) overlapFrames++;
           if (o > worst) {
             worst = o;
@@ -160,23 +177,53 @@ describe('crates never drive through each other', () => {
           }
         }
       }
+      for (const [id, sp] of internals.sprites) {
+        // Nothing ever jumps: a frame's move is at most the fastest belt/crane/train speed allows.
+        const before = prev.get(id);
+        const moved = before ? Math.hypot(sp.x - before.x, sp.y - before.y) : 0;
+        if (before && sp.phase !== 'cargo' && sp.phase !== 'yard') worstJump = Math.max(worstJump, moved);
+        prev.set(id, { x: sp.x, y: sp.y });
+        // Stuck to the belt: the belt under a crate moves exactly as far as the crate does.
+        const was = under.get(id);
+        if (!before || !was || held.has(id) || touching.has(id)) continue;
+        const ran = internals.beltTravel(...was.belt) - was.ran;
+        if (Math.abs(ran - moved) > 0.01) slips++;
+      }
     }
     const stuck = [...internals.sprites.entries()].filter(([, s]) => s.path.length || s.next).map(([id]) => id);
-    return { worst, worstPair, stuck, overlapFrames, worstJump };
+    return { worst, worstPair, stuck, overlapFrames, worstJump, slips };
+  }
+
+  /** The belt and section under a crate standing on a belt. */
+  function onBelt(internals: ReturnType<Scene['inspect']>, id: string): [Track, number] | undefined {
+    const cell = internals.cellOf(id);
+    return cell === undefined ? undefined : [CELLS[cell].track, CELLS[cell].track.sectionOf(CELLS[cell].s)];
   }
 
   for (const seed of [7, 42, 1234]) {
-    it(`chaotic floor (seed ${seed}): a change every second never gridlocks, and nothing ever jumps`, () => {
-      const { stuck, worstJump } = overlapTest(seed);
-      expect(stuck).toEqual([]);
-      expect(worstJump).toBeLessThan(6);
-    });
-
-    it(`realistic floor (seed ${seed}): 8 sessions, a change every 4s, crates keep apart`, () => {
-      const { worstPair, stuck, overlapFrames } = overlapTest(seed, 8, 240);
+    it(`chaotic floor (seed ${seed}): a change every second never gridlocks, crates keep apart, nothing ever jumps`, () => {
+      const { stuck, worstJump, overlapFrames, worstPair } = overlapTest(seed);
       expect(stuck).toEqual([]);
       expect(overlapFrames, worstPair).toBe(0);
-    });
+      expect(worstJump).toBeLessThan(6);
+    }, 20_000);
+
+    it(`realistic floor (seed ${seed}): 8 sessions, a change every 4s, crates keep apart and ride their belts`, () => {
+      const { worstPair, stuck, overlapFrames, slips } = overlapTest(seed, 8, 240);
+      expect(stuck).toEqual([]);
+      expect(overlapFrames, worstPair).toBe(0);
+      expect(slips).toBe(0);
+    }, 20_000);
+  }
+
+  // Busy floors that once ended in a standoff: crane swaps at the freight station, a pile's bottom crate holding
+  // cells it no longer needed, a crate kept in the dock queue while it lapped the main loop.
+  for (const seed of [1, 22, 73]) {
+    it(`busy floor with archiving (seed ${seed}): 16 sessions never gridlock or drive through each other`, () => {
+      const { stuck, overlapFrames, worstPair } = overlapTest(seed, 16, 60, { archive: true, seconds: 150 });
+      expect(stuck).toEqual([]);
+      expect(overlapFrames, worstPair).toBe(0);
+    }, 30_000);
   }
 });
 
