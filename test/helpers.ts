@@ -22,10 +22,15 @@ const placedBefore = new WeakMap<object, Map<string, import('../src/shared/types
  * Hands a scene a state snapshot the way the server does: each crate carries its placement from the real
  * assignPlacements(), computed against the placements of the previous snapshot for that scene.
  */
-export function serve(scene: { setCrates(crates: import('../src/shared/types').CrateView[], now: number): void }, crates: import('../src/shared/types').CrateView[], now: number): void {
+export function serve(
+  scene: { setCrates(crates: import('../src/shared/types').CrateView[], now: number): void },
+  crates: import('../src/shared/types').CrateView[],
+  now: number,
+): Map<string, import('../src/shared/types').Placement> {
   const before = placedBefore.get(scene) ?? new Map();
   const withPrev = crates.map((c) => ({ ...c, placement: before.get(c.id) }));
   const placed = assignPlacements(withPrev, now);
   placedBefore.set(scene, placed);
   scene.setCrates(withPrev.map((c) => ({ ...c, placement: placed.get(c.id) })), now);
+  return placed;
 }

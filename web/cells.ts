@@ -38,8 +38,13 @@ export function cellAt(track: Track, s: number): number {
   return base + i;
 }
 
-/** Footprints are trimmed a little, as for crates passing close by: only a real overlap is a conflict. */
-const touch = (a: Point, b: Point) => Math.abs(a.x - b.x) < CRATE_W - 6 && Math.abs(a.y - b.y) < CRATE_H - 6;
+/**
+ * Footprints are trimmed a little, as for crates passing close by, then grown by half a cell: a crate stands anywhere
+ * within half a cell of its cell's centre, so two cells conflict if crates on them could overlap.
+ */
+export const REACH_X = CRATE_W - 6 + CELL / 2;
+export const REACH_Y = CRATE_H - 6 + CELL / 2;
+const touch = (a: Point, b: Point) => Math.abs(a.x - b.x) < REACH_X && Math.abs(a.y - b.y) < REACH_Y;
 
 /** For every cell, the cells it conflicts with (itself included). */
 export const CONFLICTS: number[][] = CELLS.map(() => []);
@@ -47,7 +52,7 @@ export const CONFLICTS: number[][] = CELLS.map(() => []);
   const order = CELLS.map((_, i) => i).sort((a, b) => CELLS[a].x - CELLS[b].x);
   for (let k = 0; k < order.length; k++) {
     const a = order[k];
-    for (let m = k; m < order.length && CELLS[order[m]].x - CELLS[a].x < CRATE_W - 6; m++) {
+    for (let m = k; m < order.length && CELLS[order[m]].x - CELLS[a].x < REACH_X; m++) {
       const b = order[m];
       if (!touch(CELLS[a], CELLS[b])) continue;
       CONFLICTS[a].push(b);

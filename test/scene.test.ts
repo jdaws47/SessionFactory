@@ -12,8 +12,8 @@ function crate(id: string, zone: CrateView['zone'], zoneSince: number): CrateVie
 
 const sprite = (scene: Scene, id: string) => scene.inspect().sprites.get(id)!;
 const route = (s: Sprite) => [...s.path, ...(s.next?.path ?? [])];
-const recycles = (s: Sprite) => route(s).some((p) => p.track === NET.dock.recycle!.track);
 const usesDockBelt = (s: Sprite) => route(s).some((p) => p.track === NET.dock.track);
+const spotX = (slot: number) => NET.dock.slots[slot].pos.x;
 
 function step(scene: Scene, seconds: number, until?: () => boolean): void {
   for (let t = 0; t < seconds; t += 1 / 60) {
@@ -22,8 +22,8 @@ function step(scene: Scene, seconds: number, until?: () => boolean): void {
   }
 }
 
-describe('dock departures while a crate is still arriving', () => {
-  it('a crate resumed before it reaches the dock turns back on the loop, and nobody recycles', () => {
+describe('leaving the dock', () => {
+  it('a crate resumed before it reaches the dock turns back on the loop', () => {
     const scene = new Scene();
     const a = crate('A', 'dock', 100);
     let x = crate('X', 'working', 200);
@@ -32,78 +32,78 @@ describe('dock departures while a crate is still arriving', () => {
     serve(scene, [a, x], 1100);
     step(scene, 0.5);
     expect(usesDockBelt(sprite(scene, 'X'))).toBe(true);
-
     x = { ...x, zone: 'working', zoneSince: 400 };
     serve(scene, [a, x], 1200);
-    expect(recycles(sprite(scene, 'A'))).toBe(false);
     expect(usesDockBelt(sprite(scene, 'X'))).toBe(false);
   });
 
-  it('a crate already riding into the dock settles first; the ones in front recycle only then', () => {
+  it('the front crate rides out; one further back is lifted onto the exit lane, and the rest only ever move up', () => {
     const scene = new Scene();
-    const a = crate('A', 'dock', 100);
-    let x = crate('X', 'working', 200);
-    serve(scene, [a, x], 1000);
-    x = { ...x, zone: 'dock', zoneSince: 300 };
-    serve(scene, [a, x], 1100);
-    step(scene, 60, () => sprite(scene, 'X').path[0]?.track === NET.dock.track);
-    expect(sprite(scene, 'X').path[0]?.track).toBe(NET.dock.track);
-
-    x = { ...x, zone: 'working', zoneSince: 400 };
-    serve(scene, [a, x], 1200);
-    expect(recycles(sprite(scene, 'A'))).toBe(false);
-
-    step(scene, 60, () => recycles(sprite(scene, 'A')));
-    const settledX = sprite(scene, 'X');
-    expect(recycles(sprite(scene, 'A'))).toBe(true);
-    expect(route(settledX).some((p) => p.track === NET.dock.track)).toBe(true);
-  });
-});
-
-describe('no teleporting', () => {
-  it('a crate going round the dock recycle loop that is sent elsewhere finishes the loop first', () => {
-    const scene = new Scene();
-    let crates = [crate('A', 'dock', 100), crate('B', 'dock', 200), crate('C', 'dock', 300)];
+    let crates = [crate('A', 'dock', 100), crate('B', 'dock', 200), crate('C', 'dock', 300), crate('D', 'dock', 400)];
     serve(scene, crates, 1000);
-    crates = crates.map((c) => (c.id === 'B' ? { ...c, zone: 'working', zoneSince: 400 } : c));
+    const lifted = new Set<string>();
+    const watch = (seconds: number, staying: string[]) => {
+      const before = new Map(staying.map((id) => [id, sprite(scene, id).x]));
+      for (let t = 0; t < seconds; t += 1 / 60) {
+        scene.update(1 / 60);
+        const held = scene.inspect().cranes.dock.holding;
+        if (held) lifted.add(held);
+        // The queue runs right to left: moving up is moving left, never back.
+        for (const id of staying) {
+          expect(sprite(scene, id).x).toBeLessThanOrEqual(before.get(id)! + 0.001);
+          before.set(id, sprite(scene, id).x);
+        }
+      }
+    };
+    crates = crates.map((c) => (c.id === 'B' ? { ...c, zone: 'working', zoneSince: 500 } : c));
     serve(scene, crates, 1100);
-    step(scene, 60, () => sprite(scene, 'A').path[0]?.track === NET.dock.recycle!.track);
-    expect(sprite(scene, 'A').path[0]?.track).toBe(NET.dock.recycle!.track);
-    let { x, y } = sprite(scene, 'A');
-    crates = crates.map((c) => (c.id === 'A' ? { ...c, zone: 'storage', zoneSince: 500 } : c));
+    watch(40, ['A', 'C', 'D']);
+    expect([...lifted]).toEqual(['B']);
+    expect(sprite(scene, 'B').at.zone).toBe('working');
+    expect(['A', 'C', 'D'].map((id) => sprite(scene, id).x)).toEqual([spotX(0), spotX(1), spotX(2)]);
+
+    crates = crates.map((c) => (c.id === 'A' ? { ...c, zone: 'working', zoneSince: 600 } : c));
     serve(scene, crates, 1200);
-    let worst = 0;
-    for (let f = 0; f < 60 * 60; f++) {
-      scene.update(1 / 60);
-      const a = sprite(scene, 'A');
-      worst = Math.max(worst, Math.hypot(a.x - x, a.y - y));
-      ({ x, y } = a);
-    }
-    expect(worst).toBeLessThan(6);
+    watch(40, ['C', 'D']);
+    expect([...lifted]).toEqual(['B']);
+    expect(['C', 'D'].map((id) => sprite(scene, id).x)).toEqual([spotX(0), spotX(1)]);
+  });
+
+  it('a crate waiting for the dock crane that is sent back to the dock stays on the belt', () => {
+    const scene = new Scene();
+    let crates = [crate('A', 'dock', 100), crate('B', 'dock', 200), crate('C', 'dock', 300)];
+    serve(scene, crates, 1000);
+    crates = crates.map((c) => (c.id === 'C' ? { ...c, zone: 'working', zoneSince: 400 } : c));
+    serve(scene, crates, 1100);
+    step(scene, 0.1);
+    expect(sprite(scene, 'C').path[0]?.crane).toBe('dock');
+    crates = crates.map((c) => (c.id === 'C' ? { ...c, zone: 'dock', zoneSince: 500 } : c));
+    serve(scene, crates, 1200);
+    step(scene, 20);
+    expect(scene.inspect().cranes.dock.holding).toBeNull();
+    expect(sprite(scene, 'C').x).toBe(spotX(2));
   });
 });
 
-describe('dock order', () => {
-  it('when a middle crate leaves, the queue keeps its order (everyone circulates, nobody overtakes)', () => {
+describe('arriving at the dock', () => {
+  it('a crate that gets there after one the server has behind it is lifted over it into its spot', () => {
     const scene = new Scene();
-    let crates = [crate('A', 'dock', 100), crate('B', 'dock', 200), crate('C', 'dock', 300)];
+    // The far assembler's crate is told first; the one in storage, right by the dock's turn-off, gets there first.
+    let crates = [crate('far', 'working', 1), crate('near', 'storage', 2)];
     serve(scene, crates, 1000);
-    crates = crates.map((c) => (c.id === 'B' ? { ...c, zone: 'working', zoneSince: 400 } : c));
-    serve(scene, crates, 1100);
-    step(scene, 60);
-    const internals = scene.inspect();
-    expect(internals.dockQueue).toEqual(['A', 'C']);
-    expect(sprite(scene, 'A').x).toBeLessThan(sprite(scene, 'C').x);
-  });
-
-  it('when the front crate leaves, the rest just move up', () => {
-    const scene = new Scene();
-    let crates = [crate('A', 'dock', 100), crate('B', 'dock', 200), crate('C', 'dock', 300)];
-    serve(scene, crates, 1000);
-    crates = crates.map((c) => (c.id === 'A' ? { ...c, zone: 'working', zoneSince: 400 } : c));
-    serve(scene, crates, 1100);
-    expect(recycles(sprite(scene, 'B'))).toBe(false);
-    expect(recycles(sprite(scene, 'C'))).toBe(false);
+    step(scene, 3);
+    crates = [{ ...crates[0], zone: 'dock', zoneSince: 10 }, crates[1]];
+    serve(scene, crates, 2000);
+    crates = [crates[0], { ...crates[1], zone: 'dock', zoneSince: 11 }];
+    serve(scene, crates, 2001);
+    const lifted = new Set<string>();
+    step(scene, 120, () => {
+      const held = scene.inspect().cranes.dock.holding;
+      if (held) lifted.add(held);
+      return ['far', 'near'].every((id) => !sprite(scene, id).path.length && !sprite(scene, id).next);
+    });
+    expect([...lifted]).toEqual(['far']);
+    expect([sprite(scene, 'far').x, sprite(scene, 'near').x]).toEqual([spotX(0), spotX(1)]);
   });
 });
 
@@ -122,7 +122,7 @@ describe('crates never drive through each other', () => {
     const ids = Array.from({ length: count }, (_, i) => `c${i}`);
     let crates = ids.map((id, i) => crate(id, zones[i % zones.length], i));
     let clock = 1000;
-    serve(scene, crates, clock);
+    let placed = serve(scene, crates, clock);
     const internals = scene.inspect();
     let worst = 0;
     let worstPair = '';
@@ -143,7 +143,7 @@ describe('crates never drive through each other', () => {
         crates = crates.map((c) =>
           c.id !== pick ? c : flip ? { ...c, archived: !c.archived, archivedAt: clock } : { ...c, zone: zones[Math.floor(rnd() * zones.length)], zoneSince: clock },
         );
-        serve(scene, crates, clock);
+        placed = serve(scene, crates, clock);
       }
       const under = new Map<string, { belt: [Track, number]; ran: number }>();
       for (const id of internals.sprites.keys()) {
@@ -191,7 +191,17 @@ describe('crates never drive through each other', () => {
       }
     }
     const stuck = [...internals.sprites.entries()].filter(([, s]) => s.path.length || s.next).map(([id]) => id);
-    return { worst, worstPair, stuck, overlapFrames, worstJump, slips };
+    // Once settled, every crate on the floor stands exactly on the spot the server gave it.
+    const misplaced = crates
+      .filter((c) => !c.archived)
+      .filter((c) => {
+        const p = placed.get(c.id)!;
+        const sp = internals.sprites.get(c.id)!;
+        const spot = NET[p.area as Exclude<typeof p.area, 'warehouse'>].slots[p.slot].pos;
+        return sp.x !== spot.x || sp.y !== spot.y || sp.at.zone !== p.area || sp.at.slot !== p.slot;
+      })
+      .map((c) => c.id);
+    return { worst, worstPair, stuck, overlapFrames, worstJump, slips, misplaced };
   }
 
   /** The belt and section under a crate standing on a belt. */
@@ -202,15 +212,18 @@ describe('crates never drive through each other', () => {
 
   for (const seed of [7, 42, 1234]) {
     it(`chaotic floor (seed ${seed}): a change every second never gridlocks, crates keep apart, nothing ever jumps`, () => {
-      const { stuck, worstJump, overlapFrames, worstPair } = overlapTest(seed);
+      // Cranes are slow: give the last lifts time to finish.
+      const { stuck, worstJump, overlapFrames, worstPair, misplaced } = overlapTest(seed, 12, 70, { seconds: 105 });
       expect(stuck).toEqual([]);
+      expect(misplaced).toEqual([]);
       expect(overlapFrames, worstPair).toBe(0);
       expect(worstJump).toBeLessThan(6);
     }, 20_000);
 
     it(`realistic floor (seed ${seed}): 8 sessions, a change every 4s, crates keep apart and ride their belts`, () => {
-      const { worstPair, stuck, overlapFrames, slips } = overlapTest(seed, 8, 240);
+      const { worstPair, stuck, overlapFrames, slips, misplaced } = overlapTest(seed, 8, 240);
       expect(stuck).toEqual([]);
+      expect(misplaced).toEqual([]);
       expect(overlapFrames, worstPair).toBe(0);
       expect(slips).toBe(0);
     }, 20_000);
@@ -220,8 +233,9 @@ describe('crates never drive through each other', () => {
   // cells it no longer needed, a crate kept in the dock queue while it lapped the main loop.
   for (const seed of [1, 22, 73]) {
     it(`busy floor with archiving (seed ${seed}): 16 sessions never gridlock or drive through each other`, () => {
-      const { stuck, overlapFrames, worstPair } = overlapTest(seed, 16, 60, { archive: true, seconds: 150 });
+      const { stuck, overlapFrames, worstPair, misplaced } = overlapTest(seed, 16, 60, { archive: true, seconds: 150 });
       expect(stuck).toEqual([]);
+      expect(misplaced).toEqual([]);
       expect(overlapFrames, worstPair).toBe(0);
     }, 30_000);
   }

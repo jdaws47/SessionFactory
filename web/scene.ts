@@ -1,8 +1,8 @@
 import type { CrateView } from '../src/shared/types';
-import { ALL_TRACKS, BELT_SPEED, type Track, FREIGHT, fromHopper, fromLoop, onwardFrom, HOPPER_DROP, JUNCTIONS, LOOP, NET, type SlotRef, travel, type Waypoint, YARD } from './belts';
+import { ALL_TRACKS, BELT_SPEED, DOCK_CRANE, type Track, FREIGHT, fromHopper, fromLoop, liftOutOfDock, onwardFrom, HOPPER_DROP, JUNCTIONS, LOOP, NET, type SlotRef, travel, type Waypoint, YARD } from './belts';
 import { AREAS, type Area, CRATE_H, CRATE_W, HOPPER, MACHINE_H, MACHINE_W, type Point, TRAIN_Y, W } from './layout';
 import { Crane } from './crane';
-import { cellNear, CELLS, CONFLICTS, routeCells, SAFE } from './cells';
+import { CELL, cellNear, CELLS, CONFLICTS, REACH_X, REACH_Y, routeCells, SAFE } from './cells';
 import { Smoke } from './smoke';
 import { STACKS, Stacks, stackSpot, Train, TRAIN, WAREHOUSE_X, WORLD_W } from './warehouse';
 import { squircleAt, squirclePath } from './shapes';
@@ -40,7 +40,7 @@ export interface Sprite {
   wagonSlot?: number;
   pileRank: number;
   pileSize: number;
-  /** Order in which it came to rest where it is (undefined while moving): piles stack by it, last in on top. */
+  /** When it came to rest where it is, as a running count (undefined while moving or lifted). */
   settled?: number;
   /** Pile level a crate lowered by crane onto a factory pile lands at (set while the crane carries it). */
   dropLift?: number;
@@ -64,18 +64,8 @@ export class Scene {
   private staticKey = '';
   /** How far each belt section has travelled (key "belt:section"); sections only advance while carrying something. */
   private beltOffset = new Map<string, number>();
-  /** The storage yard's crane; it carries crates between the belt and the yard and parks at home. */
-  /** Physical order of crates on the dock belt, front first. */
-  /** Crates physically in the dock queue, front first in belt order. */
-  private dockQueue: string[] = [];
-  /** Crates going round the dock recycle loop: 'out' until they reach the recycle belt, then 'round'. */
-  private recycling = new Map<string, 'out' | 'round'>();
-  /** Crates told to leave while still riding the dock belt in: they settle first, then depart. */
-  private pendingLeave = new Set<string>();
-  /** Crates riding the dock belt on the last frame, to notice one rolling onto it. */
-  private onDockBelt = new Set<string>();
   private lastCrates: CrateView[] = [];
-  private cranes = { storage: new Crane(YARD.home), freight: new Crane(FREIGHT.home) };
+  private cranes = { storage: new Crane(YARD.home), freight: new Crane(FREIGHT.home), dock: new Crane(DOCK_CRANE.home) };
   readonly train = new Train();
   private gantry = new Crane(STACKS.home, 260, 0.2, 0.35);
   private stacks = new Stacks();
@@ -100,106 +90,13 @@ export class Scene {
     this.relayout(first);
   }
 
-  /**
-   * Assigns every crate its spot for the current snapshot: zones, dock queue order, piles, archive trips. Runs when
-   * a snapshot arrives, and again at the end of a frame in which the dock queue changed physically (see update()).
-   */
+  /** Sends every crate to the spot and pile place the server gave it; archived crates go by train (see below). */
   private relayout(first = false): void {
     const crates = this.lastCrates;
-    const dockBelt = NET.dock.track;
-
-    const byZone = new Map<Area, CrateView[]>();
-    // Only crates still on the floor can be waiting to leave the dock; drop any that were archived or removed.
-    const onFloor = new Set(crates.filter((c) => !c.archived).map((c) => c.id));
-    for (const id of this.pendingLeave) if (!onFloor.has(id)) this.pendingLeave.delete(id);
     for (const c of crates) {
-      // Where a crate goes is the server's placement; archived crates go by train (see below).
-      if (c.archived || !c.placement || c.placement.area === 'warehouse') continue;
-      let area: Area = c.placement.area;
-      const existing = this.sprites.get(c.id);
-      // Already riding the dock belt in: it keeps its place until it has settled, then leaves (see update()).
-      const ridingIn = existing && existing.phase === 'floor' && existing.at.zone === 'dock' && existing.path[0]?.track === dockBelt;
-      if (area !== 'dock' && ridingIn) {
-        this.pendingLeave.add(c.id);
-        area = 'dock';
-      } else this.pendingLeave.delete(c.id);
-      byZone.set(area, [...(byZone.get(area) ?? []), c]);
-    }
-
-    const docked = [...(byZone.get('dock') ?? [])].sort((a, b) => a.zoneSince - b.zoneSince);
-    // A crate joins the dock queue when it physically rolls onto the dock belt (see update()), so the queue
-    // always matches the order crates sit on the belt. Crates still on their way are not in it yet.
-    const stillDocked = new Set(docked.map((c) => c.id));
-    // The queue is what physically stands on the dock belt: a crate that has gone off round the main loop loses its
-    // place (it joins again at the back when it rolls back on).
-    const onTheBelt = (s: Sprite) => {
-      const q = dockBelt.at(dockBelt.project(s));
-      return s.phase === 'floor' && Math.hypot(q.x - s.x, q.y - s.y) < 2;
-    };
-    this.dockQueue = this.dockQueue.filter((id) => {
-      const s = this.sprites.get(id);
-      if (stillDocked.has(id)) return !!s && onTheBelt(s);
-      return !(s && s.path.findIndex((w) => w.track === dockBelt) > 0);
-    });
-    const onDock = (id: string) => {
-      const s = this.sprites.get(id);
-      if (!s) return first;
-      return s.phase === 'floor' && s.at.zone === 'dock' && (s.path[0]?.track === dockBelt || s.path[0]?.track === NET.dock.recycle?.track || (!s.path.length && !s.next));
-    };
-    // On the very first layout every docked crate is already in place; after that, crates join the queue only
-    // as they roll onto the dock belt (update()), and crates going round the recycle loop are out of it.
-    const joining = first ? docked.map((c) => c.id).filter((id) => !this.dockQueue.includes(id) && onDock(id)) : [];
-    // Everything in the queue sits on the main dock belt, so its order is simply belt position, front first.
-    const onDockBelt = (s: Sprite) => {
-      if (s.path[0]?.track === NET.dock.recycle?.track) return true;
-      if (s.path[0]?.track !== dockBelt) return false;
-      const q = dockBelt.at(dockBelt.project(s));
-      return Math.hypot(q.x - s.x, q.y - s.y) < 2;
-    };
-    const along = (id: string) => {
-      const sp = this.sprites.get(id);
-      if (!sp) return 0;
-      // On the recycle loop it comes back onto the dock belt at the back of the queue.
-      return sp.path[0]?.track === NET.dock.recycle?.track ? NET.dock.recycle!.mergeS : NET.dock.track.project(sp);
-    };
-    // Crates stacked on the same spot: the one on top is the first that can move up.
-    const height = (id: string) => this.sprites.get(id)?.settled ?? Infinity;
-    this.dockQueue.sort((a, b) => along(b) - along(a) || height(b) - height(a));
-    // The belt only exits past the front, so crates physically ahead of the rearmost departing crate must make
-    // way round the recycle loop. To keep the queue's order, the crates behind it follow them round too.
-    // Crates stacked in the same pile spot are not ahead of it; if nobody is ahead, the rest just move up.
-    // Departing: anything riding the dock belt towards its exit that isn't staying (still in the queue list or not).
-    const departing = [...this.sprites.entries()]
-      .filter(([id, s]) => s.phase !== 'yard' && s.phase !== 'cargo' && (!stillDocked.has(id) || s.currentTo.zone !== 'dock' || passesFront(s)) && (this.dockQueue.includes(id) || onDockBelt(s)))
-      .map(([id]) => id);
-    const rearmost = departing.length ? Math.min(...departing.map(along)) : Infinity;
-    const ahead = this.dockQueue.some((id) => stillDocked.has(id) && along(id) > rearmost + 6);
-    const makeWay = ahead ? this.dockQueue.filter((id) => stillDocked.has(id)) : [];
-    const reordered = { loopers: makeWay };
-    this.dockQueue = [...this.dockQueue.filter((id) => stillDocked.has(id) && !makeWay.includes(id)), ...joining.filter((id) => !this.dockQueue.includes(id))];
-    for (const id of makeWay) this.recycling.set(id, 'out');
-    const loopers = new Set(reordered.loopers);
-
-    for (const [zone, list] of byZone) {
-      if (zone !== 'dock') {
-        // Spot and pile order are the server's.
-        for (const c of list) {
-          const p = c.placement!;
-          this.place(c, { zone, slot: p.slot }, first, p.rank, p.pileSize, loopers.has(c.id));
-        }
-        continue;
-      }
-      // The dock still lays itself out in physical queue order on the page (the server's dock order takes over once
-      // belts carry crates physically): spots by place in the queue, its back pile by arrival.
-      const assigned = this.dockSlots(list);
-      const piles = new Map<number, CrateView[]>();
-      for (const c of list) piles.set(assigned.get(c.id)!, [...(piles.get(assigned.get(c.id)!) ?? []), c]);
-      for (const [slot, pile] of piles) {
-        pile.sort((a, b) => this.stackingOrder(b, { zone, slot }) - this.stackingOrder(a, { zone, slot }) || b.zoneSince - a.zoneSince);
-        pile.forEach((c, rank) => this.place(c, { zone, slot }, first, rank, pile.length, loopers.has(c.id)));
-        // On the first layout everything is already in place: the pile's arrival order is its stacking order.
-        if (first) for (const c of [...pile].reverse()) this.sprites.get(c.id)!.settled = ++this.arrivals;
-      }
+      const p = c.placement;
+      if (c.archived || !p || p.area === 'warehouse') continue;
+      this.place(c, { zone: p.area, slot: p.slot }, first, p.rank, p.pileSize);
     }
 
     for (const [id, s] of this.sprites) {
@@ -244,7 +141,6 @@ export class Scene {
   inspect() {
     return {
       sprites: this.sprites,
-      dockQueue: this.dockQueue as readonly string[],
       gantryJobs: this.gantryJobs as ReadonlyMap<string, 'store' | 'fetch'>,
       cranes: this.cranes,
       gantry: this.gantry,
@@ -262,7 +158,7 @@ export class Scene {
   }
   /** A recalled crate's train has left the warehouse while you watched; follow it once it crosses the page edge. */
   private followHome = false;
-  /** Counts crates coming to rest, to order piles by arrival. */
+  /** Counts crates coming to rest (see Sprite.settled). */
   private arrivals = 0;
 
   panTo(where: 'factory' | 'warehouse'): void {
@@ -285,16 +181,7 @@ export class Scene {
     return w ? [...this.stacks.stacks[w.index]].reverse() : [id];
   }
 
-  /** Dock spots by place in the physical queue; crates still on their way head for the back for now. */
-  private dockSlots(list: CrateView[]): Map<string, number> {
-    const cap = NET.dock.slots.length;
-    const rank = new Map(this.dockQueue.map((id, i) => [id, i]));
-    const back = Math.min(this.dockQueue.length, cap - 1);
-    return new Map(list.map((c) => [c.id, rank.has(c.id) ? Math.min(rank.get(c.id)!, cap - 1) : back]));
-  }
-
-
-  private place(c: CrateView, to: SlotRef, instant: boolean, pileRank: number, pileSize: number, lap = false): void {
+  private place(c: CrateView, to: SlotRef, instant: boolean, pileRank: number, pileSize: number): void {
     let s = this.sprites.get(c.id);
     if (!s) {
       const pos = NET[to.zone].slots[to.slot].pos;
@@ -323,7 +210,7 @@ export class Scene {
     }
     s.pileRank = pileRank;
     s.pileSize = pileSize;
-    if (lap || s.at.zone !== to.zone || s.at.slot !== to.slot) this.go(s, to, lap);
+    if (s.at.zone !== to.zone || s.at.slot !== to.slot) this.go(s, to);
   }
 
   /** Sends a sprite to a slot along the belts, after finishing the trip it is already on. */
@@ -352,20 +239,6 @@ export class Scene {
     return n;
   }
 
-  /** Where a crate goes in its pile: crates at rest by when they arrived, anything still on its way on top. */
-  private stackingOrder(c: CrateView, pile: SlotRef): number {
-    const s = this.sprites.get(c.id);
-    const here = s && s.at.zone === pile.zone && s.at.slot === pile.slot;
-    return !here || s.path.length || s.next || this.heldBy(c.id) ? Infinity : (s.settled ?? Infinity);
-  }
-
-  /** Re-stacks the pile at a spot after a crate comes to rest in it, so the newest arrival is on top. */
-  private restack(at: SlotRef): void {
-    const pile = [...this.sprites.values()].filter((s) => s.phase === 'floor' && s.at.zone === at.zone && s.at.slot === at.slot);
-    pile.sort((a, b) => (b.settled ?? Infinity) - (a.settled ?? Infinity));
-    pile.forEach((s, rank) => Object.assign(s, { pileRank: rank, pileSize: pile.length }));
-  }
-
   /**
    * When a crate's remaining route rides the main loop past the turn-off for `to` before leaving the loop, the
    * route cut short at that turn-off. Undefined when the turn-off isn't ahead on this stretch of loop.
@@ -392,16 +265,39 @@ export class Scene {
     return undefined;
   }
 
-  private go(s: Sprite, to: SlotRef, lap = false): void {
+  private go(s: Sprite, to: SlotRef): void {
     const same = (a: SlotRef, b: SlotRef) => a.zone === b.zone && a.slot === b.slot;
-    // Riding along the dock belt and given a different spot further along it: just stop there instead.
+    const id = this.idOf(s);
+    // Waiting for a crane to lift it: the job is called off first. If the crane is already at it (or holding it), the
+    // lift goes ahead and the crate sets off from where it is put down.
+    const waitingFor = s.path[0]?.crane;
+    if (this.heldBy(id) || (waitingFor && !this.craneFor(waitingFor).cancel(id))) {
+      s.next = same(s.currentTo, to) ? undefined : { path: travel(s.currentTo, to), to };
+      s.at = to;
+      return;
+    }
+    if (waitingFor) this.release(`crane:${id}`);
+    if (waitingFor === 'dock' && to.zone !== 'dock' && this.onQueue(s)) {
+      // Was waiting for the dock crane, and now leaves the dock: the crane lifts it out onto the exit lane instead.
+      const spot = NET.dock.slots.findIndex((q) => Math.hypot(q.pos.x - s.x, q.pos.y - s.y) < 1);
+      s.path = spot >= 0 ? travel({ zone: 'dock', slot: spot }, to) : liftOutOfDock(s.x, to);
+      s.next = undefined;
+      s.currentTo = to;
+      s.at = to;
+      return;
+    }
     const dockBelt = NET.dock.track;
     const here = dockBelt.project(s);
-    const onDockBelt = Math.hypot(dockBelt.at(here).x - s.x, dockBelt.at(here).y - s.y) < 2 && s.path[0]?.track !== NET.dock.recycle?.track;
-    if (s.currentTo.zone === 'dock' && to.zone === 'dock' && !lap && onDockBelt && (s.path.length || s.next)) {
+    const onDockBelt = Math.hypot(dockBelt.at(here).x - s.x, dockBelt.at(here).y - s.y) < 2;
+    // On the dock belt and given another dock spot: it rides up to it. One sent further back leaves by the exit lane
+    // and comes round to the back of the queue (the belt only runs forward).
+    if (to.zone === 'dock' && onDockBelt && (waitingFor === 'dock' || (s.currentTo.zone === 'dock' && (s.path.length || s.next)))) {
       const spot = NET.dock.slots[to.slot];
-      if (spot.kind === 'track' && spot.s >= here) {
-        s.path = [...dockBelt.between(here, spot.s).map((p) => ({ x: p.x, y: p.y, track: dockBelt })), spot.pos];
+      const at = NET.dock.slots.findIndex((q) => Math.hypot(q.pos.x - s.x, q.pos.y - s.y) < 1);
+      // Past the front (on the out-leg) it is already on its way out: it comes round like any other.
+      if (spot.kind === 'track' && (spot.s >= here || at >= 0 || this.onQueue(s))) {
+        s.path =
+          at === to.slot ? [] : spot.s >= here ? [...dockBelt.between(here, spot.s).map((p) => ({ x: p.x, y: p.y, track: dockBelt })), spot.pos] : at >= 0 ? travel({ zone: 'dock', slot: at }, to) : liftOutOfDock(s.x, to);
         s.next = undefined;
         s.currentTo = to;
         s.at = to;
@@ -413,8 +309,8 @@ export class Scene {
     const hop = craneAt >= 0 ? s.path[craneAt] : undefined;
     const into = NET[s.currentTo.zone].slots[s.currentTo.slot];
     const onward = hop && into.kind === 'crane' ? onwardFrom(s.currentTo.zone, into.pickupS, to) : [];
-    if (hop && into.kind === 'crane' && hop.x === into.pos.x && hop.y === into.pos.y && joins(s, s.path.slice(0, craneAt), onward) && this.craneFor(s.currentTo.zone).cancel(this.idOf(s))) {
-      this.release(`crane:${this.idOf(s)}`);
+    if (hop && into.kind === 'crane' && hop.x === into.pos.x && hop.y === into.pos.y && joins(s, s.path.slice(0, craneAt), onward) && this.craneFor(s.currentTo.zone).cancel(id)) {
+      this.release(`crane:${id}`);
       s.path = [...s.path.slice(0, craneAt), ...onward];
       s.dropLift = undefined;
       if (!away(s)) s.wagonSlot = undefined;
@@ -445,7 +341,7 @@ export class Scene {
       return;
     }
     // Heading for the dock from the main loop and not in yet: carry on round the loop instead of entering. (A crate
-    // already in the dock, e.g. going round its recycle loop, never qualifies: it finishes its trip first.)
+    // already in the dock never qualifies: it finishes its trip first.)
     const entry = s.currentTo.zone === 'dock' && to.zone !== 'dock' ? s.path.findIndex((w) => w.track === NET.dock.track) : -1;
     const dockEntry = entry > 0 && s.path[entry - 1].track === LOOP ? entry : -1;
     const turnRound = dockEntry > 0 ? fromLoop(NET.dock.entryLoopS, to) : [];
@@ -457,10 +353,10 @@ export class Scene {
       return;
     }
     if (!s.path.length && !s.next) {
-      s.path = travel(s.currentTo, to, lap);
+      s.path = travel(s.currentTo, to);
       s.currentTo = to;
     } else {
-      s.next = same(s.currentTo, to) && !lap ? undefined : { path: travel(s.currentTo, to, lap), to };
+      s.next = same(s.currentTo, to) ? undefined : { path: travel(s.currentTo, to), to };
     }
     s.at = to;
   }
@@ -473,7 +369,11 @@ export class Scene {
   /** The belt cell under a crate standing on a belt (not held by a crane, not in the wagon or warehouse). */
   private occupiedCell(id: string, s: Sprite): number | undefined {
     if (away(s) || this.heldBy(id)) return undefined;
-    if (s.path.length && !s.path[0].crane) return routeCells(s, s.path, undefined, () => true)[0]?.cell ?? cellNear(s);
+    if (s.path.length && !s.path[0].crane) {
+      const cell = routeCells(s, s.path, undefined, () => true)[0]?.cell;
+      // Not on the belt yet (still dropping down the hopper's chute): it stands on no cell.
+      if (cell !== undefined) return Math.hypot(CELLS[cell].x - s.x, CELLS[cell].y - s.y) <= CELL ? cell : undefined;
+    }
     return cellNear(s);
   }
 
@@ -498,22 +398,24 @@ export class Scene {
   /**
    * Whether `who` may hold `cell`: nobody else stands on or holds a conflicting cell. Crates resting on the spot a
    * crate is heading for are its pile (it lands on top). A crate already touching another may always move away
-   * from where that one stands, except from under it: in a pile the crate on top lifts off first.
+   * from where that one stands, even from the bottom of a pile: the belt pulls it out and the crates above drop down.
    */
   private cellFree(cell: number, who: string, owners: Map<number, Set<string>>): boolean {
-    const me = this.sprites.get(who);
+    // A crane claims for the crate it carries: that crate's pile is its pile too.
+    const me = this.sprites.get(who.startsWith('crane:') ? who.slice(6) : who);
+    const mine = (o: string) => o === who || o === `crane:${who}` || `crane:${o}` === who;
     for (const c of CONFLICTS[cell]) {
       for (const o of owners.get(c) ?? []) {
-        if (o === who) continue;
+        if (mine(o)) continue;
         const other = this.sprites.get(o);
         if (me && other && !this.heldBy(o)) {
           const resting = !other.path.length && !other.next;
           if (resting && other.phase === 'floor' && other.at.zone === me.currentTo.zone && other.at.slot === me.currentTo.slot) continue;
-          const touching = Math.abs(other.x - me.x) < CRATE_W - 6 && Math.abs(other.y - me.y) < CRATE_H - 6;
-          const onTopOfMe = Math.abs(other.x - me.x) < 1 && Math.abs(other.y - me.y) < 1 && (other.settled ?? Infinity) > (me.settled ?? Infinity);
+          // Touching as cells see it (the same reach as their conflicts), so no gap between "in the way" and "touching".
+          const touching = Math.abs(other.x - me.x) < REACH_X && Math.abs(other.y - me.y) < REACH_Y;
           // ...only moving away from it, never further into it.
           const away = Math.hypot(CELLS[cell].x - other.x, CELLS[cell].y - other.y) >= Math.hypot(me.x - other.x, me.y - other.y) - 0.5;
-          if (touching && !onTopOfMe && away && this.standing.get(o) === c) continue;
+          if (touching && away && !who.startsWith('crane:') && this.standing.get(o) === c) continue;
         }
         return false;
       }
@@ -564,8 +466,10 @@ export class Scene {
         allowed.set(id, t === cells.length - 1 ? Infinity : need[need.length - 1].dist);
       } else {
         this.lastBlockers.set(id, blockers);
-        // Only what it already holds, in order from where it stands.
-        const k = need.findIndex(({ cell }, i) => i > 0 && !(held.has(cell) && this.cellFree(cell, id, owners)));
+        // Only what it already holds, in order from where it stands (the cell under it counts as held; a crate not
+        // on the belt yet holds nothing until it is granted the way on).
+        const mine = (cell: number, i: number) => (i === 0 && this.standing.get(id) === cell) || (held.has(cell) && this.cellFree(cell, id, owners));
+        const k = need.findIndex(({ cell }, i) => !mine(cell, i));
         keep = k < 0 ? need : need.slice(0, k);
         allowed.set(id, keep.length > 1 ? keep[keep.length - 1].dist : 0);
       }
@@ -583,42 +487,41 @@ export class Scene {
     this.claims.delete(who);
   }
 
-  /** A crate riding the dock belt towards a stale spot is pointed at its current spot, if that is ahead of it. */
-  private retargetOnDockBelt(id: string, s: Sprite): void {
-    const recycle = NET.dock.recycle!;
-    if (s.at.zone !== 'dock' && s.currentTo.zone === 'dock' && s.path[0]?.track === recycle.track && s.phase !== 'yard' && s.phase !== 'cargo') {
-      // Going round the recycle loop but now leaving the dock: it rejoins the belt and rides straight out.
-      const r = recycle.track;
-      s.path = [...r.between(r.project(s), r.total).map((p) => ({ x: p.x, y: p.y, track: r })), ...onwardFrom('dock', recycle.mergeS, s.at)];
+  /** On the dock queue's stretch of belt, from the front spot back, within the dock crane's reach (its bridge runs 8px past each rail). */
+  private onQueue(s: Point): boolean {
+    const front = NET.dock.slots[0].pos;
+    return Math.abs(s.y - front.y) < 1 && s.x >= front.x - 1 && s.x <= DOCK_CRANE.rails.right + 8;
+  }
+
+  /**
+   * The dock queue only moves up its one-lane belt, so a crate can find crates that belong behind it already resting
+   * between it and its spot (it reached the dock after them, or came back from the warehouse), or be told to leave
+   * while still riding up behind crates that stay. Once it stands stuck behind them, within the dock crane's reach,
+   * the crane lifts it over them into its spot, or out onto the exit lane.
+   */
+  private liftOver(): void {
+    const dockBelt = NET.dock.track;
+    for (const [id, s] of this.sprites) {
+      if ((s.phase !== 'floor' && s.phase !== 'toFreight') || s.currentTo.zone !== 'dock' || !s.path.length || s.path.some((w) => w.crane)) continue;
+      const leaving = s.at.zone !== 'dock';
+      if (!leaving && s.next) continue;
+      if (!this.onQueue(s)) continue;
+      const cell = this.occupiedCell(id, s);
+      if (cell === undefined || CELLS[cell].track !== dockBelt) continue;
+      // Held up by a crate resting in the queue that belongs behind it (or by any, when it is leaving the dock).
+      const inTheWay = [...(this.lastBlockers.get(id) ?? [])].some((o) => {
+        const os = this.sprites.get(o);
+        return !!os && !os.path.length && !os.next && os.phase === 'floor' && os.at.zone === 'dock' && (leaving || os.at.slot > s.at.slot);
+      });
+      if (!inTheWay) continue;
+      s.path = leaving ? liftOutOfDock(s.x, s.at) : [{ ...NET.dock.slots[s.at.slot].pos, crane: 'dock' }];
       s.next = undefined;
       s.currentTo = s.at;
-      this.recycling.delete(id);
-      return;
     }
-    // (A trip to its own spot can still be a lap round the main loop: one that passes the front of the queue.)
-    if (s.at.zone !== 'dock' || s.currentTo.zone !== 'dock' || (s.currentTo.slot === s.at.slot && !s.next && !passesFront(s))) return;
-    const spot = NET.dock.slots[s.at.slot];
-    if (s.path[0]?.track === recycle.track && spot.kind === 'track' && spot.s >= recycle.mergeS) {
-      // Going round the recycle loop to a spot that has since changed: it rejoins the belt and rides to the new one.
-      const r = recycle.track;
-      const belt = NET.dock.track;
-      s.path = [...r.between(r.project(s), r.total).map((p) => ({ x: p.x, y: p.y, track: r })), ...belt.between(recycle.mergeS, spot.s).map((p) => ({ x: p.x, y: p.y, track: belt })), spot.pos];
-      s.next = undefined;
-      s.currentTo = s.at;
-      return;
-    }
-    if (this.recycling.has(id)) return;
-    const belt = NET.dock.track;
-    const here = belt.project(s);
-    const q = belt.at(here);
-    if (Math.hypot(q.x - s.x, q.y - s.y) > 2 || spot.kind !== 'track' || spot.s < here || (!s.path.length && !s.next)) return;
-    s.path = [...belt.between(here, spot.s).map((p) => ({ x: p.x, y: p.y, track: belt })), spot.pos];
-    s.next = undefined;
-    s.currentTo = s.at;
   }
 
   update(dt: number): void {
-    for (const [id, s] of this.sprites) this.retargetOnDockBelt(id, s);
+    this.liftOver();
     const allowed = this.claimCells(BELT_SPEED * dt);
     const blocked = new Set([...allowed].filter(([, d]) => d <= 0).map(([id]) => id));
     for (const [id, s] of this.sprites) {
@@ -681,11 +584,9 @@ export class Scene {
       const lift = s.lift ?? level;
       s.lift = Math.abs(level - lift) <= dt * 8 ? level : lift + Math.sign(level - lift) * dt * 8;
       const resting = !s.path.length && !s.next && !this.heldBy(id);
-      // A crate keeps its place in its pile's order until it actually moves off.
       if (this.heldBy(id) || s.x !== was.x || s.y !== was.y) s.settled = undefined;
       else if (resting && s.settled === undefined) {
         s.settled = ++this.arrivals;
-        if (s.phase === 'floor' && s.at.zone === 'dock') this.restack(s.at);
       }
       if (s.phase === 'toFreight' && !s.path.length && !s.next && !this.heldBy(id) && this.train.atFactory) {
         // Lowered into the wagon: it is cargo now (and no longer part of any factory pile).
@@ -746,33 +647,6 @@ export class Scene {
     this.updateWarehouse(dt);
     const gap = this.camTarget - this.camX;
     this.camX = Math.abs(gap) < 0.5 ? this.camTarget : this.camX + gap * Math.min(1, dt * 5);
-
-    // Crates rolling onto the dock belt join the back of the queue now, in the order they physically arrive.
-    let joined = false;
-    for (const [id, s] of this.sprites) {
-      const belt = s.path[0]?.track;
-      let lap = this.recycling.get(id);
-      // Marked as going round, but a reroute took the recycle loop out of its route: it isn't going round any more.
-      if (lap === 'out' && ![...s.path, ...(s.next?.path ?? [])].some((w) => w.track === NET.dock.recycle?.track)) {
-        this.recycling.delete(id);
-        lap = undefined;
-      }
-      if (lap === 'out' && belt === NET.dock.recycle?.track) this.recycling.set(id, 'round');
-      const settledHere = !s.path.length && !s.next;
-      if (lap === 'out' || s.phase !== 'floor' || s.at.zone !== 'dock' || !(belt === NET.dock.track || settledHere) || this.dockQueue.includes(id)) continue;
-      this.recycling.delete(id);
-      this.dockQueue.push(id);
-      joined = true;
-    }
-    // A crate leaving the dock that rolls (back) onto the dock belt behind crates resting there: they make way.
-    const onDock = new Set([...this.sprites].filter(([, s]) => s.phase === 'floor' && s.path[0]?.track === NET.dock.track).map(([id]) => id));
-    const entered = [...onDock].some((id) => !this.onDockBelt.has(id) && this.sprites.get(id)!.at.zone !== 'dock');
-    this.onDockBelt = onDock;
-    const settled = joined || entered || [...this.pendingLeave].some((id) => {
-      const s = this.sprites.get(id);
-      return !s || (!s.path.length && !s.next);
-    });
-    if (settled) this.relayout();
   }
 
   private idOf(sprite: Sprite): string {
@@ -781,13 +655,14 @@ export class Scene {
   }
 
   private craneFor(zone: Area): Crane {
-    return zone === 'freight' ? this.cranes.freight : this.cranes.storage;
+    return zone === 'freight' ? this.cranes.freight : zone === 'dock' ? this.cranes.dock : this.cranes.storage;
   }
 
   /** The crane currently holding this crate, if any. */
   private heldBy(id: string): Crane | undefined {
-    const { storage, freight } = this.cranes;
-    return storage.holding === id ? storage : freight.holding === id ? freight : this.gantry.holding === id ? this.gantry : undefined;
+    const { storage, freight, dock } = this.cranes;
+    for (const crane of [storage, freight, dock, this.gantry]) if (crane.holding === id) return crane;
+    return undefined;
   }
 
   /**
@@ -1002,6 +877,7 @@ export class Scene {
     this.smoke.draw(ctx, (x, y, size) => squirclePath(ctx, x, y, size, size, size * 0.3));
     drawCrane(ctx, this.cranes.storage, YARD.rails);
     drawCrane(ctx, this.cranes.freight, FREIGHT.rails);
+    drawCrane(ctx, this.cranes.dock, DOCK_CRANE.rails);
     drawCrane(ctx, this.gantry, STACKS.rails);
     this.drawBadges(ctx);
     ctx.restore();
@@ -1241,15 +1117,6 @@ export class Scene {
       }
     }
   }
-}
-
-/** Whether a crate's route runs on past the front of the dock queue (out of the dock, or round its recycle loop). */
-function passesFront(s: Sprite): boolean {
-  const belt = NET.dock.track;
-  const front = NET.dock.slots[0];
-  const frontS = front.kind === 'track' ? front.s : 0;
-  const beyond = (w: Waypoint) => w.track === belt && belt.project(w) > frontS + 1;
-  return s.path.some(beyond) || !!s.next?.path.some(beyond);
 }
 
 /**

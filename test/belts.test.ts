@@ -85,30 +85,31 @@ describe('belt network', () => {
     NET.dock.track.joints.forEach((j, i) => expect(j > spots[i] && j < spots[i + 1]).toBe(true));
   });
 
-  it('a crate sent further back in the dock queue circulates on the dock recycle loop, not the main loop', () => {
-    const pts = travel({ zone: 'dock', slot: 0 }, { zone: 'dock', slot: 3 });
-    expect(pts.some((p) => p.track === NET.dock.recycle!.track)).toBe(true);
-    expect(pts.some((p) => p.track === LOOP)).toBe(false);
+  it('a crate leaving the dock from behind the front is craned onto the exit lane, which climbs into the out-leg', async () => {
+    const { EXIT_Y } = await import('../web/belts');
+    const pts = travel({ zone: 'dock', slot: 2 }, { zone: 'working', slot: 0 });
+    expect(pts[1]).toEqual({ x: NET.dock.slots[2].pos.x, y: EXIT_Y, crane: 'dock' });
+    expect(pts.some((p) => p.track === NET.dock.exit!.track)).toBe(true);
+    // Never along the queue itself: it rejoins the dock belt only on the out-leg, past every spot.
+    const front = NET.dock.slots[0];
+    if (front.kind !== 'track') throw new Error('dock spots are on the belt');
+    expect(pts.filter((p) => p.track === NET.dock.track).every((p) => NET.dock.track.project(p) > front.s)).toBe(true);
   });
 
-  it('the dock recycle merge sits clear of every parked queue spot', async () => {
+  it('the front crate rides straight out', () => {
+    const pts = travel({ zone: 'dock', slot: 0 }, { zone: 'working', slot: 0 });
+    expect(pts.some((p) => p.crane)).toBe(false);
+  });
+
+  it('the front spot stands a crate clear of the exit lane climbing past it, and the dock crane reaches every spot', async () => {
     const { CRATE_W } = await import('../web/layout');
-    const recycle = NET.dock.recycle!;
-    const merge = NET.dock.track.at(recycle.mergeS);
-    for (const slot of NET.dock.slots) expect(Math.abs(slot.pos.x - merge.x)).toBeGreaterThanOrEqual(CRATE_W);
-  });
-
-  it('the dock recycle belt meets the in-leg head-on at its corner, never running alongside it', async () => {
-    const { DOCK_IN_X, DOCK_Y } = await import('../web/belts');
-    const recycle = NET.dock.recycle!.track;
-    const nearInLeg = recycle.pts.filter((p) => Math.abs(p.x - DOCK_IN_X) < 118);
-    expect(nearInLeg.every((p) => p.y >= DOCK_Y - 25)).toBe(true);
-  });
-
-  it('marks the dock recycle splitter and merger', async () => {
-    const { JUNCTIONS, DOCK_IN_X, DOCK_OUT_X, DOCK_Y } = await import('../web/belts');
-    expect(JUNCTIONS).toContainEqual({ x: DOCK_IN_X, y: DOCK_Y });
-    expect(JUNCTIONS.some((j) => j.y === DOCK_Y && j.x > DOCK_OUT_X && j.x < DOCK_OUT_X + 60)).toBe(true);
+    const { DOCK_CRANE, DOCK_OUT_X } = await import('../web/belts');
+    expect(Math.min(...NET.dock.slots.map((q) => q.pos.x)) - DOCK_OUT_X).toBeGreaterThanOrEqual(CRATE_W - 4);
+    const half = (CRATE_W * 1.08) / 2;
+    for (const q of NET.dock.slots) {
+      expect(q.pos.x - half).toBeGreaterThan(DOCK_CRANE.rails.left + 4);
+      expect(q.pos.x + half).toBeLessThan(DOCK_CRANE.rails.right - 4);
+    }
   });
 
   it('the loading dock has at least five spots', () => {
@@ -118,12 +119,6 @@ describe('belt network', () => {
   it('crates going opposite ways on the main loop never overlap', async () => {
     const { CRATE_H } = await import('../web/layout');
     expect(LANE_BOTTOM - LANE_TOP).toBeGreaterThanOrEqual(CRATE_H + 10);
-  });
-
-  it('a crate clearing the way circulates even when it comes back to the same spot', () => {
-    const pts = travel({ zone: 'dock', slot: 0 }, { zone: 'dock', slot: 0 }, true);
-    expect(pts.some((p) => p.track === NET.dock.recycle!.track)).toBe(true);
-    expect(pts[pts.length - 1]).toEqual(NET.dock.slots[0].pos);
   });
 
   it('the loop is closed', () => {

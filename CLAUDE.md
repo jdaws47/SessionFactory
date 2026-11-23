@@ -77,7 +77,7 @@ place it can stop without being in anyone's way, or none (railway-style interloc
 belt cell they set a crate down on, and only start a job they can finish. Nothing eases through or gives way on a
 timer: when crates gridlock, fix the rule or the layout that let them.
 
-Placement vs motion: the server decides where every crate goes (`placement.ts`, sent as `CrateView.placement`); the page only animates crates there and never picks a spot or an order. One exception remains until belts carry crates physically: the page still orders the loading dock by physical queue position.
+Placement vs motion: the server decides where every crate goes (`placement.ts`, sent as `CrateView.placement`); the page only animates crates there and never picks a spot or an order. The loading dock too: its belt only moves crates up, the front crate rides out, the dock crane lifts any other leaving crate onto the exit lane, and it lifts a crate that arrives out of turn over the ones in its way.
 
 Zones: `intake` (started, no prompt yet) → `working` (prompt / tool use) → `alert` (permission prompt, question, elicitation) → `dock` (turn finished) → `storage` (session ended or process gone). Archived crates leave the floor for the Warehouse. On the floor, `alert` has no area of its own: the crate stays in its assembler, which is drawn jammed (`placement.areaOf`).
 

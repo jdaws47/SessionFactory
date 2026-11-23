@@ -1,5 +1,5 @@
 import type { Zone } from '../src/shared/types';
-import { FREIGHT, LANE_BOTTOM, LANE_TOP, NET, type Track, YARD } from './belts';
+import { DOCK_CRANE, FREIGHT, LANE_BOTTOM, LANE_TOP, NET, type Track, YARD } from './belts';
 
 /** Places on the floor. Sessions waiting on you stay in their assembler (it jams), so 'alert' has no area. */
 export type Area = Exclude<Zone, 'alert'> | 'freight';
@@ -33,8 +33,8 @@ export const HOPPER: Rect = { x: 85, y: 112, w: 120, h: 84 };
 export const MACHINE_W = 148;
 export const MACHINE_H = 76;
 export const TRAIN_Y = 688;
-/** The operator stands between the dock queue and its recycle belt, at the front. */
-export const OPERATOR: Point = { x: 221, y: 655 };
+/** The operator stands between the dock queue and its exit lane, at the front. */
+export const OPERATOR: Point = { x: 229, y: 655 };
 
 export function inRect(p: Point, r: Rect): boolean {
   return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
@@ -89,7 +89,8 @@ function contents(area: Area): Rect[] {
       return [
         ...crates.map((r) => ({ ...r, y: r.y - 12, h: r.h + 12 })),
         ...belts,
-        ...(z.recycle ? beltInside(z.recycle.track, false) : []),
+        ...(z.exit ? beltInside(z.exit.track, false) : []),
+        { x: DOCK_CRANE.rails.left - 8, y: DOCK_CRANE.rails.top - 6, w: DOCK_CRANE.rails.right - DOCK_CRANE.rails.left + 16, h: DOCK_CRANE.rails.bottom - DOCK_CRANE.rails.top + 12 },
         // Operator, workbench, retro computer and mug.
         { x: OPERATOR.x - 12, y: OPERATOR.y - 33, w: 112, h: 57 },
       ];
