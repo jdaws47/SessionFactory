@@ -63,7 +63,7 @@ describe('emit-event hook', () => {
     expect(normalize(written)?.kind).toBe('stop');
   });
 
-  it('records nothing for headless claude -p runs, but still records interactive ones', () => {
+  it('records nothing for headless runs (claude -p, the Agent SDK), but still records interactive ones', () => {
     const root = path.join(import.meta.dirname, '.tmp', 'hook-headless');
     fs.rmSync(root, { recursive: true, force: true });
     fs.mkdirSync(path.join(root, 'hooks'), { recursive: true });
@@ -79,6 +79,9 @@ describe('emit-event hook', () => {
     const events = () => (fs.existsSync(path.join(root, 'data', 'events')) ? fs.readdirSync(path.join(root, 'data', 'events')) : []);
 
     expect(execFileSync(claude, ['-p', '-c', run]).toString()).toBe('');
+    expect(events()).toHaveLength(0);
+    // Driven over stream-json by a program (the Agent SDK): also headless.
+    execFileSync(claude, ['-c', run, 'claude', '--output-format', 'stream-json', '--input-format', 'stream-json']);
     expect(events()).toHaveLength(0);
 
     execFileSync(claude, ['-c', run]);

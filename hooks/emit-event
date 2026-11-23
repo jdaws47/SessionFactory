@@ -16,8 +16,9 @@
     [[ -z "$pid" || "$pid" -le 1 ]] && break
   done
 
-  # Headless runs (claude -p / --print, e.g. scrub-in's /init) are not sessions you work in: record nothing.
-  if [[ -n "$claude_pid" ]] && tr '\0' '\n' < "/proc/$claude_pid/cmdline" 2>/dev/null | grep -qxE -- '-p|--print'; then
+  # Headless runs are not sessions you work in: record nothing. That is claude -p / --print (e.g. scrub-in's /init)
+  # and programs driving claude over stream-json (the Agent SDK), which may be started from a factory terminal.
+  if [[ -n "$claude_pid" ]] && tr '\0' '\n' < "/proc/$claude_pid/cmdline" 2>/dev/null | grep -qxE -- '-p|--print|--input-format'; then
     exit 0
   fi
 

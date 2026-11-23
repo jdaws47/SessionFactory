@@ -78,6 +78,20 @@ export class Terminals {
     return changed;
   }
 
+  /** The Claude process running in a factory terminal (a child of its shell), if there is one. */
+  async claudePid(slot: string): Promise<number | undefined> {
+    try {
+      const { stdout } = await this.tmux(['list-panes', '-t', slot, '-F', '#{pane_pid}']);
+      const shell = Number(stdout.trim().split('\n')[0]);
+      if (!shell) return undefined;
+      const { stdout: kids } = await run('ps', ['-o', 'pid=,comm=', '--ppid', String(shell)]);
+      const line = kids.split('\n').find((l) => /\sclaude/.test(l));
+      return line ? Number(line.trim().split(/\s+/)[0]) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   async start(slot: string, command: string): Promise<void> {
     await this.tmux(['new-session', '-d', '-s', slot, '-x', '200', '-y', '50', '-c', this.cleanRoot, '-e', `SF_SLOT=${slot}`, '-e', 'CLAUDE_CODE_AUTO_CONNECT_IDE=false']);
     await this.tmux(['send-keys', '-t', slot, '-l', command]);

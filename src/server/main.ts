@@ -265,6 +265,17 @@ app.socket('/ws/term/:slot', (ws, { slot }, query) => {
   ws.on('close', () => term.kill());
 });
 
+/** Ends crates whose Claude has gone, unless their factory terminal still runs one (see Registry.checkLiveness). */
+async function checkLiveness(): Promise<void> {
+  const running = new Map<string, number>();
+  for (const c of registry.all()) {
+    if (!c.slot || !c.pid || c.zone === 'storage' || isAlive(c.pid) || !terminals.liveSlots.has(c.slot)) continue;
+    const pid = await terminals.claudePid(c.slot);
+    if (pid) running.set(c.slot, pid);
+  }
+  registry.checkLiveness(isAlive, Date.now(), running);
+}
+
 registry.onChange(() => {
   broadcast();
   noticeEndedTerminals();
@@ -272,7 +283,7 @@ registry.onChange(() => {
 ingestor.start();
 await terminals.refresh();
 // No hook fires when a session dies without ending (crash, terminal closed), so this one check stays a poll.
-const liveness = setInterval(() => registry.checkLiveness(isAlive, Date.now()), 60_000);
+const liveness = setInterval(() => void checkLiveness(), 60_000);
 const jiraPoll = setInterval(() => void pollJira(), 5 * 60_000);
 setTimeout(() => void pollJira(), 5000);
 

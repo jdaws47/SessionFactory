@@ -112,6 +112,13 @@ describe('persistence and lifecycle', () => {
     expect(reg.get(id)?.archived).toBe(false);
   });
 
+  it("a crate whose terminal still runs Claude isn't ended when another process it heard from goes", () => {
+    reg.ingest(ev({ kind: 'prompt', sessionId: 'a', pid: 42, slot: 'sf-abcd', prompt: 'x' }));
+    const id = reg.all()[0].id;
+    reg.checkLiveness((pid) => pid === 7, 5000, new Map([['sf-abcd', 7]]));
+    expect(reg.get(id)).toMatchObject({ zone: 'working', pid: 7 });
+  });
+
   it('a session ended from the factory goes to storage even without a known process', () => {
     reg.ingest(ev({ kind: 'prompt', sessionId: 'a', prompt: 'x' }));
     const id = reg.all()[0].id;

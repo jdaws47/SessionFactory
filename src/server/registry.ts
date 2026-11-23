@@ -247,12 +247,17 @@ export class Registry {
     this.update(id, (c) => (c.zone === 'storage' ? c : { ...c, zone: 'storage', zoneSince: now, endedAt: now, alertReason: undefined, waitingOn: undefined }));
   }
 
-  /** Moves crates whose Claude process has gone away (crash, closed terminal) into storage. */
-  checkLiveness(isAlive: (pid: number) => boolean, now: number): void {
+  /**
+   * Moves crates whose Claude process has gone away (crash, closed terminal) into storage. A crate whose factory
+   * terminal still runs Claude (`running`: slot → that Claude's pid) is not ended: the process it last heard from
+   * was another one started from that terminal, so it takes on the terminal's Claude again.
+   */
+  checkLiveness(isAlive: (pid: number) => boolean, now: number, running: ReadonlyMap<string, number> = new Map()): void {
     for (const c of this.all()) {
-      if (c.pid && c.zone !== 'storage' && !isAlive(c.pid)) {
-        this.put({ ...c, zone: 'storage', zoneSince: now, endedAt: now, alertReason: undefined });
-      }
+      if (!c.pid || c.zone === 'storage' || isAlive(c.pid)) continue;
+      const still = c.slot ? running.get(c.slot) : undefined;
+      if (still) this.put({ ...c, pid: still });
+      else this.put({ ...c, zone: 'storage', zoneSince: now, endedAt: now, alertReason: undefined });
     }
   }
 
