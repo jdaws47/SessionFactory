@@ -35,7 +35,10 @@ export function endsWithQuestion(message: string | undefined): boolean {
   const last = blocks[blocks.length - 1];
   if (!last) return false;
   const isList = last.split('\n').every((line) => /^\s*([-*+]|\d+[.)])\s/.test(line));
-  const text = (isList ? blocks.slice(-2) : [last]).join('\n').replace(/`[^`\n]*`/g, '');
+  // A one-sentence closing paragraph doesn't hide the sentence just before it ("Which do you want?\n\nI'll wait.").
+  const sentences = (b: string) => b.match(/[^.?!]+(?:[.?!]+|$)/g) ?? [];
+  const before = blocks.length > 1 && !isList && sentences(last).length === 1 ? sentences(blocks[blocks.length - 2]).slice(-1) : [];
+  const text = (isList ? blocks.slice(-2) : [...before, last]).join('\n').replace(/`[^`\n]*`/g, '');
   if (DECISION.test(text)) return true;
   // Judge each question on its own: one offering alternatives ("…, or should I create one?"), or any question that
   // isn't a yes/no go-ahead, needs you; a go-ahead question alone ("Want me to start?") doesn't.

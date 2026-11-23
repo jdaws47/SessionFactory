@@ -117,6 +117,14 @@ describe('zone state machine', () => {
     expect(codeQuestion.zone).toBe('dock');
   });
 
+  it('a question split from a short closing sentence by a blank line still counts', () => {
+    const split = run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', lastMessage: 'Both fixes are in.\n\nWhich branch should the review go on?\n\nI can start either way.' });
+    expect(split.zone).toBe('alert');
+    // Only the sentence just before it: an earlier question in that paragraph is not the ending.
+    const earlier = run({ kind: 'prompt', prompt: 'go' }, { kind: 'stop', lastMessage: 'Why did it lap? The reroute waited for the turn-off, so I fixed it.\n\nReload to see it.' });
+    expect(earlier.zone).toBe('dock');
+  });
+
   it('an idle reminder does not pull a fresh session out of intake', () => {
     const crate = run({ kind: 'start', source: 'startup' }, { kind: 'notify', notificationType: 'idle_prompt' });
     expect(crate.zone).toBe('intake');
