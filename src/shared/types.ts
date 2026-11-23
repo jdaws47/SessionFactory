@@ -4,8 +4,6 @@ export type Zone = 'intake' | 'working' | 'alert' | 'dock' | 'storage';
 /** Where the server puts a crate. The page only animates crates into their placements; it never chooses one. */
 export type PlacementArea = 'intake' | 'working' | 'dock' | 'storage' | 'warehouse';
 
-/** How many spots each area has. Extra crates pile on the area's last spot. */
-export const CAPACITY: Record<PlacementArea, number> = { intake: 1, working: 10, dock: 5, storage: 6, warehouse: 96 };
 
 export interface Placement {
   area: PlacementArea;

@@ -20,7 +20,7 @@ export const TRAIN = {
   accel: 140,
 };
 
-/** Warehouse floor: a gantry crane over a field of crate spots (one crate per spot). */
+/** Warehouse floor: a gantry crane over a field of crate spots; once every spot is taken, crates pile up on them. */
 const PLATFORM = { x: WAREHOUSE_X + 60, y: 40, w: W - 100, h: 830 };
 export const STACKS = {
   platform: PLATFORM,
@@ -29,9 +29,10 @@ export const STACKS = {
   /** Parks top-left in its own lane above the first row, short of the rail ends so the supports show past it. */
   home: { x: PLATFORM.x + 70, y: PLATFORM.y + 75 },
   /** Fills the building from the left wall below the parking lane; spots over the train's track are left out (see SPOTS). */
-  field: { x: PLATFORM.x + 44, y: 130, cols: 10, rows: 10, cw: 136, ch: 70 },
-  levels: 1,
-  lift: 0,
+  field: { x: PLATFORM.x + 44, y: 142, cols: 10, rows: 10, cw: 136, ch: 70 },
+  /** Each crate up a pile sits this much further up and to the left, like the factory's piles, shown up to 4 high. */
+  lift: 6,
+  shownLevels: 4,
 };
 
 /** The train (both engines) and its track at the warehouse stop, which crate spots keep clear of. */
@@ -57,12 +58,13 @@ export function stackCentre(index: number): Point {
 /** Where a crate at a given level of a stack sits. */
 export function stackSpot(index: number, level: number): Point {
   const c = stackCentre(index);
-  return { x: c.x, y: c.y - level * STACKS.lift };
+  const k = Math.min(level, STACKS.shownLevels - 1) * STACKS.lift;
+  return { x: c.x - k, y: c.y - k };
 }
 
 /**
- * Stacks of crates: each stack holds up to STACKS.levels (more pile on the last stack). New crates go on the
- * first stack with room, filling from the train side outwards; taking a crate out lets the ones above settle.
+ * Stacks of crates, one per spot. A crate goes on the spot the server placed it on (or, without one, on the lowest
+ * stack, nearest the train first); taking a crate out lets the ones above settle.
  */
 export class Stacks {
   readonly stacks: string[][] = Array.from({ length: SPOTS.length }, () => []);
@@ -72,17 +74,11 @@ export class Stacks {
     const found = this.where(id);
     if (found && (spot === undefined || found.index === spot)) return found;
     if (found) this.remove(id);
-    let index = spot ?? this.stacks.findIndex((s) => s.length < STACKS.levels);
+    const lowest = Math.min(...this.stacks.map((s) => s.length));
+    let index = spot ?? this.stacks.findIndex((s) => s.length === lowest);
     if (index < 0 || index >= this.stacks.length) index = this.stacks.length - 1;
     this.stacks[index].push(id);
     return { index, level: this.stacks[index].length - 1 };
-  }
-
-  /** Reserves a spot for a crate on its way in, without it being on a stack yet. */
-  nextSpot(): Point {
-    const index = this.stacks.findIndex((s) => s.length < STACKS.levels);
-    const i = index < 0 ? this.stacks.length - 1 : index;
-    return stackSpot(i, Math.min(this.stacks[i].length, STACKS.levels - 1));
   }
 
   remove(id: string): void {
@@ -102,7 +98,7 @@ export class Stacks {
 
   spotOf(id: string): Point | undefined {
     const w = this.where(id);
-    return w ? stackSpot(w.index, Math.min(w.level, STACKS.levels + 2)) : undefined;
+    return w ? stackSpot(w.index, w.level) : undefined;
   }
 }
 

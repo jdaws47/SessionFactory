@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { assignPlacements } from '../src/server/placement';
-import { CAPACITY, type Crate, type Placement } from '../src/shared/types';
+import { assignPlacements, CAPACITY } from '../src/server/placement';
+import type { Crate, Placement } from '../src/shared/types';
 
 let clock = 1000;
 function crate(id: string, over: Partial<Crate> = {}): Crate {
@@ -56,18 +56,35 @@ describe('server placement', () => {
     expect(at(place(crates), 'd')).toBe('working/0');
   });
 
-  it('a full area piles on its last spot, last in on top; a freed spot is taken by the top of the pile first', () => {
+  it('a full area piles up evenly from its first spot, last in on top; a freed spot is taken by the top of a pile', () => {
     const crates = Array.from({ length: CAPACITY.storage }, (_, i) => crate(`s${i}`, { zone: 'storage', zoneSince: i }));
     place(crates);
     crates.push(crate('x', { zone: 'storage', zoneSince: 50 }));
     place(crates);
     crates.push(crate('y', { zone: 'storage', zoneSince: 60 }));
     const p = place(crates);
+    expect([at(p, 's0'), at(p, 'x'), at(p, 's1'), at(p, 'y')]).toEqual(['storage/0#1', 'storage/0#0', 'storage/1#1', 'storage/1#0']);
+    // A spot frees up: the top of a pile moves into it; the other pile stays as it is.
     const last = CAPACITY.storage - 1;
-    expect([at(p, `s${last}`), at(p, 'x'), at(p, 'y')]).toEqual([`storage/${last}#2`, `storage/${last}#1`, `storage/${last}#0`]);
-    crates[0].zone = 'dock';
+    crates.find((c) => c.id === `s${last}`)!.zone = 'dock';
     const q = place(crates);
-    expect([at(q, 'y'), at(q, 'x'), at(q, `s${last}`)]).toEqual(['storage/0', `storage/${last}#0`, `storage/${last}#1`]);
+    expect([at(q, 'x'), at(q, 's0'), at(q, 'y'), at(q, 's1')]).toEqual([`storage/${last}`, 'storage/0', 'storage/1#0', 'storage/1#1']);
+  });
+
+  it('a full warehouse starts a second layer from its first spot, and a third after that', () => {
+    const n = CAPACITY.warehouse;
+    const all = Array.from({ length: n * 2 + 1 }, (_, i) => crate(`w${i}`, { archived: true, archivedAt: i }));
+    place(all.slice(0, n));
+    place(all.slice(0, 2 * n));
+    const p = place(all);
+    expect([at(p, `w${n}`), at(p, `w${n + 1}`), at(p, `w${2 * n - 1}`), at(p, `w${2 * n}`)]).toEqual(['warehouse/0#1', 'warehouse/1#0', `warehouse/${n - 1}#0`, 'warehouse/0#0']);
+  });
+
+  it('a crate that comes back to intake after being anywhere else waits at the dock: intake only takes new crates', () => {
+    const crates = [crate('a', { zone: 'storage', turns: 0 })];
+    place(crates);
+    crates[0].zone = 'intake';
+    expect(at(place(crates), 'a')).toBe('dock/0');
   });
 
   it('warehouse spots are sticky and fill from the first free one', () => {

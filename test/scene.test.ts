@@ -379,11 +379,17 @@ describe('piles', () => {
   it('are last in, first out: the newest crate is on top, drawn last, and the first to leave the pile', () => {
     const scene = new Scene();
     const cap = NET.storage.slots.length;
-    const crates = Array.from({ length: cap + 2 }, (_, i) => crate(`c${i}`, 'storage', 100 + i));
-    serve(scene, crates, 1000);
-    const pile = [`c${cap - 1}`, `c${cap}`, `c${cap + 1}`];
+    const crates = Array.from({ length: 2 * cap + 1 }, (_, i) => crate(`c${i}`, 'storage', 100 + i));
+    // A full yard piles up evenly from its first spot: a second layer, then a third on spot 0.
     const { sprites } = internals(scene);
-    expect(new Set(pile.map((id) => sprites.get(id)!.at.slot)).size).toBe(1);
+    const settle = () => step(scene, 300, () => [...sprites.values()].every((sp) => !sp.path.length && !sp.next && sp.settled !== undefined));
+    serve(scene, crates.slice(0, cap), 1000);
+    serve(scene, crates.slice(0, 2 * cap), 2000);
+    settle();
+    serve(scene, crates, 3000);
+    settle();
+    const pile = ['c0', `c${cap}`, `c${2 * cap}`];
+    expect(pile.map((id) => sprites.get(id)!.at.slot)).toEqual([0, 0, 0]);
 
     // Drawn bottom to top in arrival order, each one higher than the one under it.
     const order = internals(scene).drawOrder().map(([id]) => id).filter((id) => pile.includes(id));
@@ -392,11 +398,13 @@ describe('piles', () => {
     expect(heights[1]).toBeLessThan(heights[0]);
     expect(heights[2]).toBeLessThan(heights[1]);
 
-    // A spot frees up: the top crate (newest) moves into it, the older ones stay put.
-    serve(scene, crates.filter((c) => c.id !== 'c0'), 2000);
-    expect(sprites.get(`c${cap + 1}`)!.at.slot).toBe(0);
-    expect(sprites.get(`c${cap}`)!.at.slot).toBe(cap - 1);
-    expect(sprites.get(`c${cap - 1}`)!.at.slot).toBe(cap - 1);
+    // A spot frees up: the top of a pile moves into it; nothing under a top moves.
+    const leaving = ['c1', `c${cap + 1}`];
+    serve(scene, crates.filter((c) => !leaving.includes(c.id)), 4000);
+    const moved = [...sprites].filter(([id, sp]) => !leaving.includes(id) && sp.at.slot === 1).map(([id]) => id);
+    expect(moved).toHaveLength(1);
+    expect(Number(moved[0].slice(1))).toBeGreaterThanOrEqual(cap);
+    expect(pile.map((id) => sprites.get(id)!.at.slot)).toEqual([0, 0, 0]);
   });
 });
 
@@ -539,8 +547,10 @@ describe('warehouse layout', () => {
       expect(c.x - 59).toBeGreaterThan(STACKS.rails.left + 4);
       expect(c.x + 59).toBeLessThan(STACKS.rails.right - 4);
       expect(c.y + 28).toBeLessThan(p.y + p.h);
-      // The parked gantry trolley (30px tall) sits above every crate.
-      expect(c.y - 28).toBeGreaterThan(STACKS.home.y + 15);
+      // The parked gantry trolley (30px tall) sits above every crate, even at the top of a pile.
+      const top = (STACKS.shownLevels - 1) * STACKS.lift;
+      expect(c.y - 28 - top).toBeGreaterThan(STACKS.home.y + 15);
+      expect(c.x - 59 - top).toBeGreaterThan(STACKS.rails.left + 4);
     }
     // ...and short of the rail ends, so the supports show past it.
     expect(STACKS.home.y - 15).toBeGreaterThan(STACKS.rails.top);

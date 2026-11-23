@@ -1,4 +1,15 @@
-import { CAPACITY, type Crate, type Placement, type PlacementArea, type Zone } from '../shared/types';
+import { NET } from '../../web/belts';
+import { SPOTS } from '../../web/warehouse';
+import type { Crate, Placement, PlacementArea, Zone } from '../shared/types';
+
+/** How many spots each area has, read off the floor's own geometry so the server never hands out a spot the page can't draw. */
+export const CAPACITY: Record<PlacementArea, number> = {
+  intake: NET.intake.slots.length,
+  working: NET.working.slots.length,
+  dock: NET.dock.slots.length,
+  storage: NET.storage.slots.length,
+  warehouse: SPOTS.length,
+};
 
 /**
  * Where crates go: the single source of truth for placement and order. The page only animates crates into these
@@ -6,17 +17,18 @@ import { CAPACITY, type Crate, type Placement, type PlacementArea, type Zone } f
  */
 
 /**
- * The area a crate in a given state belongs in. Waiting on you keeps it in its assembler (which jams); a session back
- * at "intake" after it has already had turns (e.g. /clear) waits at the dock, since intake only takes new crates.
+ * The area a crate in a given state belongs in. Waiting on you keeps it in its assembler (which jams). Intake only
+ * takes new crates (it is fed by the hopper alone): a crate back at "intake" after it has had turns (e.g. /clear),
+ * or after it was placed anywhere else, waits at the dock instead.
  */
-export function areaOf(c: Pick<Crate, 'zone' | 'turns' | 'archived'>): PlacementArea {
+export function areaOf(c: Pick<Crate, 'zone' | 'turns' | 'archived' | 'placement'>): PlacementArea {
   if (c.archived) return 'warehouse';
-  return floorArea(c.zone, c.turns);
+  return floorArea(c.zone, c.turns > 0 || (!!c.placement && c.placement.area !== 'intake'));
 }
 
-function floorArea(zone: Zone, turns: number): Exclude<PlacementArea, 'warehouse'> {
+function floorArea(zone: Zone, beenOut: boolean): Exclude<PlacementArea, 'warehouse'> {
   if (zone === 'alert') return 'working';
-  if (zone === 'intake' && turns > 0) return 'dock';
+  if (zone === 'intake' && beenOut) return 'dock';
   return zone;
 }
 
@@ -37,7 +49,9 @@ export function assignPlacements(crates: Crate[], now: number): Map<string, Plac
   const byArea = new Map<PlacementArea, Crate[]>();
   for (const c of crates) {
     const area = areaOf(c);
-    byArea.set(area, [...(byArea.get(area) ?? []), c]);
+    const list = byArea.get(area);
+    if (list) list.push(c);
+    else byArea.set(area, [c]);
   }
 
   const slotOf = new Map<string, number>();
@@ -50,24 +64,26 @@ export function assignPlacements(crates: Crate[], now: number): Map<string, Plac
       continue;
     }
     // Sticky: the crate at the bottom of each spot (or alone on it) keeps it. Crates piled on top of others take
-    // free spots top-first (last in, first out), then newcomers in the order they arrived.
+    // empty spots top-first (last in, first out), or stay put; then newcomers in the order they arrived. With every
+    // spot taken, newcomers pile up evenly: the lowest pile first, the first spot on a tie (so a full warehouse lays
+    // a second layer from spot 0 on, then a third, and so on).
     const prevIn = (c: Crate) => (c.placement?.area === area && c.placement.slot < cap ? c.placement : undefined);
-    const used = new Set<number>();
+    const height = new Array<number>(cap).fill(0);
     const rest: Crate[] = [];
     for (const c of [...list].sort((a, b) => (prevIn(a)?.since ?? Infinity) - (prevIn(b)?.since ?? Infinity))) {
       const prev = prevIn(c);
-      if (prev && prev.rank === prev.pileSize - 1 && !used.has(prev.slot)) {
-        used.add(prev.slot);
+      if (prev && prev.rank === prev.pileSize - 1 && !height[prev.slot]) {
+        height[prev.slot]++;
         slotOf.set(c.id, prev.slot);
       } else rest.push(c);
     }
     const piled = rest.filter((c) => prevIn(c)).sort((a, b) => prevIn(a)!.rank - prevIn(b)!.rank);
     const arriving = rest.filter((c) => !prevIn(c)).sort((a, b) => arrivedAt(area, a) - arrivedAt(area, b) || a.id.localeCompare(b.id));
     for (const c of [...piled, ...arriving]) {
-      let slot = 0;
-      while (slot < cap && used.has(slot)) slot++;
-      if (slot >= cap) slot = cap - 1;
-      used.add(slot);
+      // A piled crate moves only to an empty spot; otherwise it stays on its pile.
+      const empty = height.indexOf(0);
+      const slot = empty >= 0 ? empty : (prevIn(c)?.slot ?? height.indexOf(Math.min(...height)));
+      height[slot]++;
       slotOf.set(c.id, slot);
     }
   }
@@ -81,7 +97,9 @@ export function assignPlacements(crates: Crate[], now: number): Map<string, Plac
     const prev = c.placement;
     since.set(c.id, prev && prev.area === area && prev.slot === slot ? prev.since : now);
     const key = `${area}/${slot}`;
-    spots.set(key, [...(spots.get(key) ?? []), c]);
+    const pile = spots.get(key);
+    if (pile) pile.push(c);
+    else spots.set(key, [c]);
   }
   const out = new Map<string, Placement>();
   for (const pile of spots.values()) {
