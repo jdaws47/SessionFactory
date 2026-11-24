@@ -43,6 +43,7 @@ src/shared/types.ts   Crate / state types shared by server and web
 src/server/
   events.ts           Hook envelope -> FactoryEvent (drops transcript_path on purpose)
   machine.ts          Pure zone state machine: (crate, event) -> crate
+  placement.ts        Pure placement: where every crate goes (area, spot, pile order, dock/intake order). The single source of truth
   labels.ts           Repo, Jira-key and label derivation; clean-room boundary check
   registry.ts         Persistent crate store (data/registry.json), session linking, archive, liveness
   ingest.ts           Drains data/events/ into the registry (fs.watch + polling)
@@ -67,7 +68,9 @@ Factory terminals: the server starts `tmux new-session -e SF_SLOT=<slot>` in cle
 
 State flow: Claude hook → `hooks/emit-event` → `data/events/*.json` → `EventIngestor` → `Registry.ingest` → `applyEvent` → websocket broadcast → `Scene.setCrates`.
 
-Zones: `intake` (started, no prompt yet) → `working` (prompt / tool use) → `alert` (permission prompt, question, elicitation) → `dock` (turn finished) → `storage` (session ended or process gone). Archived crates leave the floor for the Warehouse. On the floor, `alert` has no area of its own: the crate stays in its assembler, which is drawn jammed (`layout.floorArea`).
+Placement vs motion: the server decides where every crate goes (`placement.ts`, sent as `CrateView.placement`); the page only animates crates there and never picks a spot or an order. One exception remains until belts carry crates physically: the page still orders the loading dock by physical queue position.
+
+Zones: `intake` (started, no prompt yet) → `working` (prompt / tool use) → `alert` (permission prompt, question, elicitation) → `dock` (turn finished) → `storage` (session ended or process gone). Archived crates leave the floor for the Warehouse. On the floor, `alert` has no area of its own: the crate stays in its assembler, which is drawn jammed (`placement.areaOf`).
 
 ## Testing
 

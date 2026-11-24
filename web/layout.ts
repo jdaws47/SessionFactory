@@ -4,17 +4,6 @@ import { FREIGHT, LANE_BOTTOM, LANE_TOP, NET, type Track, YARD } from './belts';
 /** Places on the floor. Sessions waiting on you stay in their assembler (it jams), so 'alert' has no area. */
 export type Area = Exclude<Zone, 'alert'> | 'freight';
 
-/**
- * Where a crate in a given state sits on the floor. Waiting on you means a jammed assembler; a session
- * back at "intake" after it has already had turns (e.g. /clear) waits at the dock, since intake only
- * takes brand-new crates from the hopper.
- */
-export function floorArea(zone: Zone, turns = 0): Area {
-  if (zone === 'alert') return 'working';
-  if (zone === 'intake' && turns > 0) return 'dock';
-  return zone;
-}
-
 export interface Point {
   x: number;
   y: number;

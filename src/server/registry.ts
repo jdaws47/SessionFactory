@@ -6,6 +6,7 @@ import type { FactoryEvent } from './events';
 import type { PastSession } from './history';
 import { DEFAULT_JIRA_PROJECTS, isWithin, refreshLabel, repoOf } from './labels';
 import { applyEvent, isSyntheticPrompt, newCrate } from './machine';
+import { assignPlacements } from './placement';
 
 export const READY_TO_SHIP_AFTER_MS = 3 * 24 * 3600 * 1000;
 /** A /clear ends one session id and starts the next in the same process within moments. */
@@ -256,15 +257,23 @@ export class Registry {
     }
   }
 
-  /** The dock's queue, front first: crates waiting for your next prompt, longest-waiting first (the source of truth). */
-  dockOrder(): string[] {
-    return this.all()
-      .filter((c) => !c.archived && (c.zone === 'dock' || (c.zone === 'intake' && c.turns > 0)))
-      .sort((a, b) => a.zoneSince - b.zoneSince || a.id.localeCompare(b.id))
-      .map((c) => c.id);
+  /** Updates every crate's placement (sticky against its previous one) and keeps it with the crate. */
+  private placeAll(now: number): void {
+    const placements = assignPlacements(this.all(), now);
+    let changed = false;
+    for (const c of this.crates.values()) {
+      const p = placements.get(c.id);
+      if (JSON.stringify(p) !== JSON.stringify(c.placement)) {
+        c.placement = p;
+        changed = true;
+      }
+    }
+    if (changed) this.scheduleSave();
   }
 
+  /** What the page gets: every crate with its placement and display hints. */
   view(now: number, liveSlots: Set<string> = new Set()): CrateView[] {
+    this.placeAll(now);
     return this.all().map((c) => {
       let readyToShip: string | undefined;
       if (!c.archived) {
